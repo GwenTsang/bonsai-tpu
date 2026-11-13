@@ -271,10 +271,17 @@ def embed_many(params, tokens):
     return fwht_batched(x, jnp, jax.lax) * params['signs'][x.shape[-1]]
 
 
+def linear_many(x, signs, mat, gdn=False):
+    """Folded ternary projection for [M, K] activations: fused rotate kernel, then the GEMM kernel."""
+    if gdn:
+        x = grouped_gdn(x, xp=jnp)
+    return kernels.gemm_rotated(kernels.rotate_for_gemm(x, signs), mat, x.shape[0])
+
+
 def ffn_many(cfg, L, signs, x):
-    gu = kernels.gemm(rotate(x, signs[cfg.n_embd]), L['ffn_gu'])
+    gu = linear_many(x, signs[cfg.n_embd], L['ffn_gu'])
     act = jax.nn.silu(gu[:, :cfg.n_ff]) * gu[:, cfg.n_ff:]
-    return kernels.gemm(rotate(act, signs[cfg.n_ff]), L['ffn_down'])
+    return linear_many(act, signs[cfg.n_ff], L['ffn_down'])
 
 
 def gdn_scan(q, k, v, gate, beta, state):
@@ -343,7 +350,7 @@ def recurrent_mixer_many(cfg, L, signs, h, conv_state, gdn_state, n_valid):
     valid = (jnp.arange(m) < n_valid).astype(jnp.float32)
     dk, hk, hv = cfg.gdn_dk, cfg.gdn_k_heads, cfg.gdn_v_heads
     c = cfg.gdn_inner + 2 * hk * dk
-    qkvz = kernels.gemm(rotate(h, signs[cfg.n_embd]), L['qkvz'])
+    qkvz = linear_many(h, signs[cfg.n_embd], L['qkvz'])
     qkv, z = qkvz[:, :c], qkvz[:, c:]
     alpha = jnp.matmul(h, L['alpha'].T, precision=HI)
     beta = jax.nn.sigmoid(jnp.matmul(h, L['beta'].T, precision=HI))
@@ -359,7 +366,7 @@ def recurrent_mixer_many(cfg, L, signs, h, conv_state, gdn_state, n_valid):
     # padded rows are exact no-ops for the recurrence: no decay, no write
     out, gdn_state = gdn_chunked(q, k * valid[:, None, None], v, gate, beta * valid[:, None], gdn_state, chunk=32)
     out = (rms_norm(out, L['ssm_norm']) * jax.nn.silu(z.reshape(m, hv, dk))).reshape(m, -1)
-    y = kernels.gemm(rotate(out, signs[cfg.gdn_inner], gdn=True), L['out'])
+    y = linear_many(out, signs[cfg.gdn_inner], L['out'], gdn=True)
     new_conv = jax.lax.dynamic_slice(window, (n_valid, 0), (nk - 1, c))            # last 3 valid inputs
     return y, new_conv, gdn_state
 
@@ -368,7 +375,7 @@ def attention_mixer_many(cfg, L, signs, h, k_cache, v_cache, pos):
     m = h.shape[0]
     nh, nkv, hd = cfg.n_head, cfg.n_head_kv, cfg.head_dim
     positions = pos + jnp.arange(m)
-    qkv = kernels.gemm(rotate(h, signs[cfg.n_embd]), L['qkv'])
+    qkv = linear_many(h, signs[cfg.n_embd], L['qkv'])
     qg = qkv[:, :nh * hd * 2].reshape(m, nh, 2 * hd)
     q = rope(rms_norm(qg[..., :hd], L['q_norm']), positions[:, None, None], cfg)
     gate = qg[..., hd:].reshape(m, -1)
@@ -381,7 +388,7 @@ def attention_mixer_many(cfg, L, signs, h, k_cache, v_cache, pos):
     qh = q.reshape(m, nkv, per, hd).transpose(1, 0, 2, 3).reshape(nkv, m * per, hd)       # rows (token, head)
     out = attend(qh, jnp.repeat(positions, per), k_cache, v_cache, hd ** -0.5)
     out = out.reshape(nkv, m, per, hd).transpose(1, 0, 2, 3).reshape(m, -1) * jax.nn.sigmoid(gate)
-    y = kernels.gemm(rotate(out, signs[nh * hd]), L['out'])
+    y = linear_many(out, signs[nh * hd], L['out'])
     return y, k_cache, v_cache
 
 
@@ -423,4 +430,4 @@ def verify_chunk(cfg, params, state, tokens, n_valid):
     """Speculative-decoding verification: logits [M, vocab] after every position, and the new state."""
     x, new = forward_chunk(cfg, params, state, tokens, n_valid)
     h = rms_norm(x, params['out_norm'])
-    return kernels.gemm(rotate(h, params['signs'][cfg.n_embd]), params['head']), new
+    return linear_many(h, params['signs'][cfg.n_embd], params['head']), new

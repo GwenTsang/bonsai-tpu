@@ -146,3 +146,53 @@ def gemm(x, mat, bm_max=256):
     if mp != m:
         xp = jnp.pad(xp, ((0, mp - m), (0, 0)))
     return _gemm_kernel(xp, w, s, bm, pick_bn(w.shape[1], 2176))[:m]
+
+
+def _gemm_perm():
+    """Column order of the GEMM kernel's shift planes: position (j, g, i) holds input 128g + 32j + i."""
+    import numpy as np
+    return np.arange(BK).reshape(NG, 4, 32).transpose(1, 0, 2).reshape(-1)
+
+
+def rotate_for_gemm(x, signs, bm_max=256):
+    """Fused prefill pre-processing in VMEM: sign flip, normalized 1024-block Hadamard (two exact BF16 MXU
+    passes on a bf16-split activation), permutation into the GEMM kernel's column order and the BF16 cast.
+    x f32 [M, K] -> bf16 [M', K] with M' = M rounded up to the row tile (feed to gemm_rotated)."""
+    import numpy as np
+    from .hadamard import _H1024
+    m, k = x.shape
+    bm = min(bm_max, -(-m // 16) * 16)
+    mp = -(-m // bm) * bm
+    if mp != m:
+        x = jnp.pad(x, ((0, mp - m), (0, 0)))
+    h = jnp.asarray(_H1024[:, _gemm_perm()] * np.float32(1024 ** -0.5), dtype=jnp.bfloat16)   # +-1/32: exact
+
+    def body(xr, sr, hr, yr):
+        xs = xr[...] * sr[...]
+        a = xs.astype(jnp.bfloat16)
+        b = (xs - a.astype(jnp.float32)).astype(jnp.bfloat16)
+        hv = hr[...]
+        dims = (((1,), (0,)), ((), ()))
+        y = (jax.lax.dot_general(a, hv, dims, preferred_element_type=jnp.float32)
+             + jax.lax.dot_general(b, hv, dims, preferred_element_type=jnp.float32))
+        yr[...] = y.astype(jnp.bfloat16)
+
+    return pl.pallas_call(
+        body,
+        grid_spec=pltpu.PrefetchScalarGridSpec(
+            num_scalar_prefetch=0,
+            in_specs=[pl.BlockSpec((bm, BK), lambda i, g: (i, g)),
+                      pl.BlockSpec((1, BK), lambda i, g: (0, g)),
+                      pl.BlockSpec((BK, BK), lambda i, g: (0, 0))],
+            out_specs=pl.BlockSpec((bm, BK), lambda i, g: (i, g)),
+            grid=(mp // bm, k // BK)),
+        out_shape=jax.ShapeDtypeStruct((mp, k), jnp.bfloat16),
+        compiler_params=pltpu.CompilerParams(dimension_semantics=('parallel', 'parallel')))(
+            x, signs.reshape(1, k), h)
+
+
+def gemm_rotated(xp, mat, m, bm_max=256):
+    """y[m, N] for activations already produced by rotate_for_gemm (padded, permuted, BF16)."""
+    w, s = mat['w'], mat['s']
+    bm = min(bm_max, xp.shape[0])
+    return _gemm_kernel(xp, w, s, bm, pick_bn(w.shape[1], 2176))[:m]
