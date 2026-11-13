@@ -13,6 +13,10 @@ if 'PARAMS' not in globals() or globals().get('RELOAD'):
 else:
     CFG=M.Config(G.metadata)
 import gc
+for _o in [o for o in gc.get_objects() if type(o).__name__=='ThreadingHTTPServer']:   # orphaned dev servers pin HBM
+    try:_o.shutdown();_o.server_close();_o.RequestHandlerClass=None
+    except Exception as _e:print('server shutdown',_e)
+_o=None
 for _n in [n for n in list(globals()) if n not in ('PARAMS','CFG','G','LOAD_S','RELOAD','M','GGUF') and not n.startswith('_') and type(globals()[n]).__name__ not in ('module','function','type','builtin_function_or_method')]:
     del globals()[_n]
 gc.collect()

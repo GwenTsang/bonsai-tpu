@@ -10,6 +10,7 @@ from .tokenizer import BonsaiTokenizer, StreamDecoder
 
 PREFILL_BUCKETS = (512, 64)      # compiled chunk sizes; any shorter remainder is padded into one
 TOPK = 64
+MAX_STOP = 8
 
 
 def top_candidates(logits, k=TOPK, width=128):
@@ -94,7 +95,16 @@ class Engine:
 
     # -- state ------------------------------------------------------------------------------------
     def reset(self):
-        self.state = M.init_state(self.cfg, self.n_ctx, self.kv_dtype, slack=PREFILL_BUCKETS[0])
+        old = getattr(self, 'state', None)
+        self.snapshots = []
+        if old is None:
+            self.state = M.init_state(self.cfg, self.n_ctx, self.kv_dtype, slack=PREFILL_BUCKETS[0])
+        else:
+            # KV rows are position-addressed and masked by pos: keep the buffers (no second multi-GiB
+            # allocation), clear only the recurrent state
+            self.state = {'pos': jnp.zeros((), jnp.int32), 'k': old['k'], 'v': old['v'],
+                          'conv': [jnp.zeros_like(c) for c in old['conv']],
+                          'gdn': [jnp.zeros_like(g) for g in old['gdn']]}
         self.history = []          # token ids already absorbed into the state
         self.pending_logits = None
         self.snapshots = []        # recurrent-state checkpoints, ascending position
@@ -220,7 +230,9 @@ class Engine:
         self.stats = {'prompt_tokens': len(prompt_ids) - n, 'reused_tokens': n, 'prefill_s': t1 - t0,
                       'completion_tokens': 0, 'decode_s': 0.0}
         produced = 0
-        stop_arr = jnp.asarray(sorted(stop) or [-1], jnp.int32)
+        if len(stop) > MAX_STOP:
+            raise ValueError('at most %d stop ids' % MAX_STOP)
+        stop_arr = jnp.asarray((sorted(stop) + [-1] * MAX_STOP)[:MAX_STOP], jnp.int32)   # fixed shape: one program
         while not (token in stop or produced >= max_new_tokens or len(self.history) >= self.n_ctx):
             yield token
             produced += 1
