@@ -47,27 +47,130 @@ reference/         CPU oracle tools built against the pinned Prism llama.cpp
 tests/             CPU tests (pytest)
 ```
 
-## Quick start (existing Colab TPU session)
+## Quick start: local pi harness, remote Colab TPU
 
-The Colab CLI must already be attached to a TPU v5e-1 session under the alias `bonsai-tpu`.
-Nothing here provisions or stops a runtime.
+Run setup on your **local Linux/macOS machine**, from this repository's root. Pi's tools read and edit
+files locally; the model runs in the attached Colab session. No local JAX, weights, GPU, or OpenAI account
+is needed. The connection uses authenticated `colab exec`, including streaming, with no SSH/public tunnel.
+
+### 1. Prepare locally before allocating the TPU
+
+You need Python 3.11+, the [Colab CLI](https://github.com/googlecolab/google-colab-cli), and Node.js
+22.19+ if pi is missing. Install Node from [nodejs.org](https://nodejs.org/), or use
+[pi's official installer](https://github.com/earendil-works/pi/tree/main/packages/coding-agent), which
+can also install Node. Install the Colab CLI with `uv` (or `pipx install google-colab-cli`):
 
 ```sh
-scripts/start_server.sh 65536     # downloads weights on the runtime if needed, loads, warms up, serves, tunnels
+uv tool install google-colab-cli
+python3 -m bonsai_tpu.setup_colab --prepare-only
+colab sessions
+```
+
+`colab sessions` authenticates your Google account. On first use, follow its browser URL and paste the
+authorization code in your own terminal. Colab authentication and Hugging Face authentication are
+separate. Complete these local preparations before starting the TPU clock.
+
+`--prepare-only` installs pi **only when it cannot find an existing installation**, into
+`~/.local/share/bonsai_tpu/pi`, without sudo or a global npm upgrade. It merges the `bonsai-tpu` provider
+and model into `~/.pi/agent/models.json` (or `$PI_CODING_AGENT_DIR/models.json`). Existing providers,
+credentials, other models and custom sampling settings are preserved. It backs up an existing file before
+changing it; an unchanged configuration is not rewritten. `auth.json` and pi's default model are untouched.
+To test with an isolated profile, add `--pi-agent-dir /path/to/test-profile` to both setup commands.
+
+### 2. Attach a v5e-1 runtime, then start with one command
+
+Reuse your existing CLI session named `bonsai-tpu`, or request one explicitly:
+
+```sh
+colab new -s bonsai-tpu --tpu v5e1
+python3 -m bonsai_tpu.setup_colab --session bonsai-tpu --hf-token hf_YOUR_READ_TOKEN
+```
+
+Setup itself **never provisions another runtime**. It checks the attached v5e-1, uploads source, installs
+missing runtime dependencies (including tested JAX/TPU 0.11.2), downloads the 5.9 GB GGUF directly onto
+Colab, loads the model, warms the programs, starts the local OpenAI-compatible bridge, and configures pi.
+The default context is 65,536 tokens. Use `--ctx 32768` for a smaller cache, or `--port 8001` if local port
+8000 is occupied. Select a download revision with `BONSAI_REVISION` on the runtime if needed.
+
+A Hugging Face **read** token is optional for this public model. Authenticated requests have
+[higher rate limits](https://huggingface.co/docs/hub/rate-limits), which can avoid anonymous download
+throttling; higher bandwidth is not guaranteed. Xet high-performance transfer mode is enabled. The token
+is staged as a private file, consumed on the runtime, and removed. It is not embedded in executed source,
+pi config or setup logs. For a token kept out of shell history and process arguments, use `HF_TOKEN` or
+`--hf-token-file` instead:
+
+```sh
+read -rs -p 'Hugging Face read token: ' HF_TOKEN; echo
+export HF_TOKEN
+python3 -m bonsai_tpu.setup_colab --session bonsai-tpu
+unset HF_TOKEN
+```
+
+Downloads, converted weights and compilation caches are reused while the runtime survives. Repeating
+the same setup reuses a healthy server. If dependencies change after JAX was imported, setup asks you
+to run `colab restart-kernel -s bonsai-tpu` and rerun it; downloaded files and the compilation cache survive
+a kernel restart, while in-memory state is cleared.
+
+### 3. Use pi or test the API
+
+Use the exact `Run:` line printed by setup. It uses an existing pi executable or the full path of the
+private installation, so pi does not have to be on your PATH. If it is on PATH, the equivalent is:
+
+```sh
+pi --provider bonsai-tpu --model ternary-bonsai-2-27b
+# Short smoke test with reasoning/tools disabled:
+pi --provider bonsai-tpu --model ternary-bonsai-2-27b --thinking off --no-tools --no-session -p 'What is 2+2?'
+```
+
+For an isolated profile, prefix pi with `PI_CODING_AGENT_DIR=/path/to/test-profile`. Existing interactive
+pi sessions can reload the model list with `/model`.
+
+```sh
+curl http://127.0.0.1:8000/v1/models
 curl http://127.0.0.1:8000/v1/chat/completions -H 'Content-Type: application/json' \
-  -d '{"messages":[{"role":"user","content":"Hello"}],"stream":true}'
+  -d '{"messages":[{"role":"user","content":"Hello"}],"thinking":false,"stream":true,"max_tokens":64}'
 ```
 
-`HF_TOKEN` (or the local Hugging Face login) is forwarded to the runtime for the download; it is never logged.
+The Colab-exec bridge adds a request round trip (about 0.5–1 s in a warm smoke test); throughput numbers
+above measure the TPU engine, not this transport. Streamed/non-streamed responses and tool calls use
+the same server API. One request runs at a time.
 
-Agent harness ([pi](https://pi.dev)):
+### A short free-Colab session
+
+Plan around your available time, including the roughly **1h30** budget reported for your account.
+Colab does **not** guarantee that duration or v5e-1 availability: [limits vary with account, demand and
+usage](https://research.google.com/colaboratory/faq.html#resource-limits). A fresh runtime needs the
+download plus roughly 2–3 minutes of first compilation; network and dependency installation times vary.
+Prepare pi/authentication locally first, start inference once, and avoid the development benchmarks
+during a short session. Free-tier rules also restrict SSH remote control; the primary setup uses Colab
+CLI execution. Follow Colab's current policies; this helper does not extend quotas, prevent expiry or
+automatically allocate replacement sessions.
+
+When finished, release the runtime explicitly:
 
 ```sh
-PI_CODING_AGENT_DIR=$PWD/pi-agent pi --provider bonsai-tpu --model ternary-bonsai-2-27b
+colab stop -s bonsai-tpu
 ```
 
-`pi-agent/models.json` declares the endpoint; copy its provider block into `~/.pi/agent/models.json` to make it
-available everywhere.
+Local bridge logs/PID files are `~/.cache/bonsai_tpu/bridge-<port>.log` and `.pid`. To stop the bridge,
+send SIGTERM to the saved PID after checking it still belongs to `bonsai_tpu.colab_bridge`. Releasing
+the runtime and stopping the local bridge are separate actions.
+
+### Troubleshooting setup
+
+- **Authentication/session missing:** run `colab sessions` in your terminal, then `colab status -s bonsai-tpu`.
+  Accelerator allocation depends on your account's current quota/availability.
+- **An observation timed out:** the remote job may still be running. Rerun the same setup to inspect/join
+  it; do not restart solely because an observation failed.
+- **Runtime package restart requested:** follow the printed `colab restart-kernel` command, then rerun
+  setup. Files survive a kernel restart, but not losing the runtime VM.
+- **Setup failed:** retrieve its runtime log with
+  `colab download -s bonsai-tpu /content/bonsai-setup.log ./bonsai-setup.log`.
+- **Invalid existing pi config:** setup stops without replacing it. Repair the JSON or use an isolated
+  `--pi-agent-dir`. Backups are `models.json.bonsai-backup-<timestamp>`.
+- **Development runs:** `scripts/run.sh`/`runs/load.py` stop the server while experimenting. Rerun setup
+  afterward. `scripts/start_server.sh`/`scripts/tunnel.sh` are the older SSH development flow and require
+  your own SSH setup and an account/runtime where SSH is permitted.
 
 ### On the runtime itself
 
@@ -127,14 +230,10 @@ The CPU oracle is the pinned PrismML llama.cpp fork (`scripts/build_reference.sh
 
 ## Recovery after a lost runtime
 
-Source, results and the research log are in this repository; nothing on the runtime is needed.
-
-1. Attach the Colab CLI to an authorized TPU v5e-1 session and alias it `bonsai-tpu` (`colab sessions`,
-   `colab status`). Do not use `colab run`; it provisions a new VM.
-2. `scripts/start_server.sh` — re-downloads the GGUF onto the runtime (5.9 GB), converts it on the TPU
-   (13 s), compiles the four programs (2-3 min cold) and opens the tunnel.
-3. Development runs: `scripts/run.sh runs/<script>.py` executes a script in the persistent kernel (the model
-   stays loaded between runs) and polls its log.
+Source, results and the research log are in this repository. Attach a newly authorized v5e-1 CLI session
+and rerun `python3 -m bonsai_tpu.setup_colab --session bonsai-tpu` with your HF token if desired. It
+re-downloads and recompiles; local pi configuration is reused. `colab run` creates/releases a separate
+VM, so it is not the persistent interactive startup command.
 
 ## Limitations
 

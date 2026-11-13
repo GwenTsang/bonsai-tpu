@@ -1,0 +1,15 @@
+{
+  "pi_version": "1.5.2",
+  "pi_reply": "42",
+  "pi_wall_s": 1.4468783609991078,
+  "transport": "colab-exec",
+  "local_port": 8001,
+  "nonstream_reply": "21",
+  "model": "ternary-bonsai-2-27b",
+  "remote_state": {
+    "phase": "ready",
+    "staged_token_exists": false
+  },
+  "hf_staging_test": "placeholder token consumed/removed on an already-loaded model; no fresh authenticated download measured",
+  "unrelated_pi_config_preserved": true
+}

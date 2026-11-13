@@ -281,3 +281,24 @@ Recovery: `scripts/start_server.sh [n_ctx]` (attach-only; never provisions). See
   documented rather than asserting bit-identical free generation across policies.
 - Reproduction, TTFT, padding-work interpretation and raw data: research/PREFILL_SCHEDULING.md,
   results/prefill-costs.json, results/prefill-schedule.json. Final TPU run: PREFILL_SCHEDULE_VALIDATED.
+
+## 2026-11-13 — Portable Colab startup and pi integration
+
+- New entrypoint: python3 -m bonsai_tpu.setup_colab --hf-token ... . Local-only preparation can install
+  pi before TPU allocation; existing pi is reused. Installation uses a private npm prefix and the current
+  tested pi 1.5.2. models.json is merged atomically, backed up, and left unchanged on repeated setup;
+  other providers, credentials, models and custom sampling values are preserved.
+- Runtime bootstrap attaches only, installs missing dependencies, stages/consumes HF credentials without
+  embedding their values in executed source, reuses resident parameters, warms the engine and serves.
+  Same-source/context setup rejoins a running job or reuses a healthy server. JAX upgrades explicitly
+  request a kernel restart when needed. No automatic runtime allocation or replacement.
+- The primary local API bridge carries HTTP/SSE through authenticated Colab CLI exec; no SSH is required.
+  README now documents authentication, Node/pi prerequisites, token arguments/environment/files, setup,
+  pi/API smoke tests, recovery, cleanup, and the variable free-tier limits (90 minutes is not guaranteed).
+- Validation: 37 CPU tests pass, including configuration preservation/idempotence, missing/existing pi,
+  token staging, dependency-restart handling, transport round trips/errors and literal prompt handling.
+  Installed pi 1.5.2, ran a real pi prompt through the bridge (42), real nonstream API (21) and streamed
+  French greeting. Tested server reuse and placeholder-token cleanup on the existing loaded runtime;
+  a fresh authenticated 5.9 GB download was not remeasured. Raw smoke evidence: results/setup-colab.json.
+- Current local pi profile points at port 8001 because the earlier development SSH tunnel occupies 8000.
+  The new setup defaults to 8000 on a fresh machine. Existing unrelated defaults.py edits are not included.
