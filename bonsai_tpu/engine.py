@@ -177,9 +177,19 @@ class Engine:
         return time.perf_counter() - t
 
     # -- core -------------------------------------------------------------------------------------
-    def feed(self, tokens):
-        """Absorb tokens into the state; returns device logits after the last one."""
+    def feed(self, tokens, snap_at=()):
+        """Absorb tokens into the state; returns device logits after the last one.  `snap_at` lists absolute
+        positions (message boundaries) at which to checkpoint the recurrent state on the way."""
         tokens = [int(t) for t in tokens]
+        base = len(self.history)
+        cuts = sorted(p - base for p in set(snap_at) if base < p < base + len(tokens))
+        if cuts:
+            logits = None
+            for a_, b_ in zip([0] + cuts, cuts + [len(tokens)]):
+                logits = self.feed(tokens[a_:b_])
+                if b_ != len(tokens):
+                    self.snapshot()
+            return logits
         if len(self.history) + len(tokens) > self.n_ctx:
             raise ValueError('context overflow: %d + %d > n_ctx=%d' % (len(self.history), len(tokens), self.n_ctx))
         logits = self.pending_logits
@@ -200,7 +210,7 @@ class Engine:
         return logits
 
     def generate_ids(self, prompt_ids, max_new_tokens=256, temperature=0.0, top_k=20, top_p=0.95, min_p=0.0,
-                     seed=0, stop_ids=None, reuse_prefix=True):
+                     seed=0, stop_ids=None, reuse_prefix=True, snap_at=()):
         """Yield generated token ids.  With reuse_prefix, a prompt extending the absorbed history only
         processes the new suffix (multi-turn chat keeps recurrent state and KV cache)."""
         prompt_ids = [int(t) for t in prompt_ids]
@@ -220,7 +230,7 @@ class Engine:
             n = self.rewind(min(lcp, len(prompt_ids) - 1))
         stop = self.tokenizer.eot_ids if stop_ids is None else set(stop_ids)
         t0 = time.perf_counter()
-        logits = self.feed(prompt_ids[n:])
+        logits = self.feed(prompt_ids[n:], snap_at)
         self.snapshot()            # prompt end: the usual resume point of the next agent turn
         key = jax.random.PRNGKey(seed)
         args = (jnp.float32(temperature), jnp.int32(top_k), jnp.float32(top_p), jnp.float32(min_p))
@@ -230,6 +240,7 @@ class Engine:
         self.stats = {'prompt_tokens': len(prompt_ids) - n, 'reused_tokens': n, 'prefill_s': t1 - t0,
                       'completion_tokens': 0, 'decode_s': 0.0}
         produced = 0
+        blocks_done = 0
         if len(stop) > MAX_STOP:
             raise ValueError('at most %d stop ids' % MAX_STOP)
         stop_arr = jnp.asarray((sorted(stop) + [-1] * MAX_STOP)[:MAX_STOP], jnp.int32)   # fixed shape: one program
@@ -237,7 +248,10 @@ class Engine:
             yield token
             produced += 1
             # run up to `block` steps on device: feeds `token`, returns the tokens sampled after it
-            budget = min(self.block, max_new_tokens - produced + 1, self.n_ctx - len(self.history))
+            # ramp 1, 2, 4, ... so the first tokens stream immediately, then amortise dispatch
+            budget = min(self.block, 1 << min(blocks_done, 10), max_new_tokens - produced + 1,
+                         self.n_ctx - len(self.history))
+            blocks_done += 1
             out, cnt, self.state, key, logits = self._block_fn()(
                 self.params, self.state, jnp.int32(token), key, jnp.int32(budget), *args, stop_arr)
             out = np.asarray(out)[:int(cnt)].tolist()

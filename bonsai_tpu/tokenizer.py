@@ -33,9 +33,32 @@ class BonsaiTokenizer:
         self.eot_ids = {self.eos_id, vocab['<|endoftext|>'], vocab['<|im_end|>']}
         self.template_source = metadata.get('tokenizer.chat_template')
         self._template = None
+        self._seg_cache = {}
 
     def encode(self, text):
         return self.tk.encode(text, add_special_tokens=False).ids
+
+    def encode_chat(self, text):
+        """Tokenize a rendered chat prompt message by message with a segment cache.
+
+        '<|im_start|>' is a control token, so tokenization never crosses it and the concatenation of
+        per-message encodings equals encoding the whole prompt.  Agent loops resend the same messages
+        every turn; cached segments make tokenizing a long conversation O(new text).
+        Returns (ids, boundaries) where boundaries are the token offsets at which messages start."""
+        mark = '<|im_start|>'
+        parts = text.split(mark)
+        segs = ([parts[0]] if parts[0] else []) + [mark + p for p in parts[1:]]
+        ids, bounds = [], []
+        for seg in segs:
+            got = self._seg_cache.get(seg)
+            if got is None:
+                got = self.encode(seg)
+                if len(self._seg_cache) >= 4096:
+                    self._seg_cache.pop(next(iter(self._seg_cache)))
+                self._seg_cache[seg] = got
+            bounds.append(len(ids))
+            ids.extend(got)
+        return ids, bounds
 
     def decode(self, ids, skip_special=True):
         return self.tk.decode(list(ids), skip_special_tokens=skip_special)

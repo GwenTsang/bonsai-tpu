@@ -180,6 +180,7 @@ def make_handler(engine, model_name, default_thinking=False, default_max_tokens=
             self._json(404, {'error': {'message': 'not found'}})
 
         def do_POST(self):
+            t_req = time.perf_counter()
             try:
                 body = json.loads(self.rfile.read(int(self.headers.get('Content-Length', 0))) or b'{}')
             except Exception:
@@ -202,7 +203,12 @@ def make_handler(engine, model_name, default_thinking=False, default_max_tokens=
                         enable_thinking=bool(thinking), **kw)
                 else:
                     prompt = body['prompt'] if isinstance(body['prompt'], str) else body['prompt'][0]
-                ids = engine.tokenizer.encode(prompt)
+                ids, bounds = engine.tokenizer.encode_chat(prompt)
+                # checkpoint where the conversation proper starts (after system prompt + tool schemas) and at
+                # the last message: new sessions and edited last turns then resume without a full prefill
+                first = next((b for b in bounds if b > 0), 0) if chat else 0
+                snap_at = [p for p in {first, bounds[-2] if len(bounds) > 2 else 0} if p > 0]
+                host_ms = 1e3 * (time.perf_counter() - t_req)
                 if len(ids) >= engine.n_ctx:
                     raise ValueError('prompt has %d tokens; n_ctx is %d' % (len(ids), engine.n_ctx))
             except Exception as e:
@@ -237,7 +243,7 @@ def make_handler(engine, model_name, default_thinking=False, default_max_tokens=
                                                        'finish_reason': None}]))
                 dec = StreamDecoder(engine.tokenizer, skip_special=False)
                 split = OutputSplitter(bool(thinking), bool(tools), stops)
-                gen = engine.generate_ids(ids, **samp)
+                gen = engine.generate_ids(ids, snap_at=snap_at, **samp)
                 try:
                     for tok in gen:
                         for kind, text in split.push(dec.push(tok)):
@@ -259,7 +265,7 @@ def make_handler(engine, model_name, default_thinking=False, default_max_tokens=
                 usage = {'prompt_tokens': len(ids), 'completion_tokens': st.get('completion_tokens', 0),
                          'total_tokens': len(ids) + st.get('completion_tokens', 0),
                          'prompt_tokens_details': {'cached_tokens': st.get('reused_tokens', 0)}}
-                timings = {'prompt_n': st.get('prompt_tokens', 0), 'cache_n': st.get('reused_tokens', 0),
+                timings = {'host_prepare_ms': host_ms, 'prompt_n': st.get('prompt_tokens', 0), 'cache_n': st.get('reused_tokens', 0),
                            'prompt_ms': 1e3 * st.get('prefill_s', 0.0), 'predicted_n': st.get('completion_tokens', 0),
                            'predicted_ms': 1e3 * st.get('decode_s', 0.0)}
                 if st.get('decode_s'):

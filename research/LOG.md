@@ -155,3 +155,83 @@ than the CPU reference's 8-bit activations and than BF16.
   256-token chunk: 0.205 s = 1247 tok/s with a sequential GDN scan. Batched vs token-by-token on the same
   256 tokens: logits rel L2 0.13%, KL 9e-6, GDN state 0.5%, K cache 0.44% (BF16 prefill vs 16-bit decode).
   Prefill-then-decode vs CPU reference: same argmax, KL <= 7e-5 (prefill-check.json).
+
+## 2026-11-13 — Decode 78 tok/s, prefill 1700 tok/s, 64K context, agentic serving (session 3, continued)
+
+### Decode profile and fixes (profile-decode.json, profile-overhead.json, kernel-floor.json, dma-streams.json)
+
+Ablation of the first 20.65 ms step: Pallas kernels 11.0 ms, Hadamard butterflies 6-7 ms (256 rotations x
+10 tiny XLA stages), scale re-read for the code-offset correction ~1.4 ms, jit dispatch of a ~1000-leaf
+pytree ~1.3 ms, recurrent math 0.9 ms, attention 0.45 ms, embedding 0.12 ms.
+
+| Change | Step time |
+|---|---:|
+| first full model | 20.65 ms |
+| Hadamard as H32 (x) H32 MXU products at HIGHEST precision (6.14 -> 0.63 ms/token, error 9e-8) | |
+| code-offset correction inside the kernel, in integers (no second pass over scales) | 13.4 ms |
+| on-device while_loop over tokens (no per-token dispatch), exact two-level top-k sampler | 12.8 ms (78 tok/s) |
+
+- hadamard-variants.json: butterfly 6.14 ms, single HIGHEST 1024x1024 product 1.30 ms, Kronecker 0.63 ms,
+  default-precision product 0.59 ms but 0.17% error.
+- Read-only Pallas kernels over all 257 weight matrices take 10.5 ms for 7.2 GB = ~690 GB/s whatever the
+  tile shape and with 1, 2 or 4 concurrent DMA streams per step: this is the HBM read ceiling. The real
+  GEMV pass is 11.5 ms. Decode therefore sits ~10% above the bandwidth floor of the 2-bit format plus
+  ~2 ms of non-matmul work. Remaining ideas: 16-bit scale storage (-0.6 ms, needs an integer->float
+  bitcast in Mosaic), fusing small recurrent ops.
+- lax.top_k over 248K logits costs 0.56 ms; the exact two-level variant (top rows by row maximum, then
+  top-k of those rows) 0.19 ms.
+
+### Prefill (profile-prefill.json, profile-prefill-parts.json, gdn-chunked.json)
+
+At M=512 the sequential GDN scan cost 4.1 ms/layer and HIGHEST-precision Hadamard 1.4 ms per 17408-wide
+rotation; the GEMMs were only ~40% of the time.
+- Chunk-parallel gated delta rule (derivation in model.gdn_chunked): all unit-triangular chunk systems are
+  inverted at once, leaving T/32 sequential steps. 1.23 ms/layer, agrees with the scan to 1.4e-5.
+- XLA folds an f32->bf16->f32 round trip away, so "split into bf16 pieces" must be done by masking mantissa
+  bits. With exact pieces and a +-1 matrix, two single-pass BF16 MXU products give a ~16-bit-accurate
+  Hadamard at 0.57 ms (was 1.41 ms).
+- `jnp` fancy-index gathers for the key-head tiling were replaced by `tile`.
+- Padded chunks: prefill_chunk takes n_valid; padding is a no-op for GDN (beta=0, gate=0, k=0), the conv
+  state is sliced at n_valid, KV rows beyond n_valid are overwritten later. Two compiled sizes (512, 64)
+  serve any prompt length.
+
+### Context scaling (bench-context-*.json; BF16 KV, n_ctx 65536, HBM in use 11.4 GiB)
+
+| Prompt tokens | Prefill tok/s (warm) | Decode tok/s after prompt |
+|---:|---:|---:|
+| 432 (FP32 KV) | 1376 | 77.5 |
+| 1968 | 1842 | 76.0 |
+| 8112 | 1743 | 71.1 |
+| 32688 | 1314 | 59.2 |
+| 65456 | 1183 (55.3 s) | 49.9 |
+
+These used the earlier power-of-two attention buckets. Attention is now a streaming online softmax in a
+while_loop over 4096-key blocks: one program for every length, temporaries bounded by the block, cost
+follows the used length. Block decode with BF16 KV: 13.1 ms at ~0 context, 13.4 ms at 8K, 18.8 ms at 60K
+(att-block.json; 1024/2048/8192-key blocks are within 10%).
+
+### Host memory and compile time
+
+- A host OOM killed the kernel during development: every cached TPU executable pins ~1.1 GiB of host RAM
+  (47 GiB after ~30 programs). `jax.clear_caches()` + `malloc_trim` releases it. The engine now needs only
+  three programs (decode block, prefill 512, prefill 64) and bounds its program cache.
+- Persistent XLA cache works on TPU: a 36 s compile becomes a 5 s load; engine warm-up 118 s cold, ~20 s warm.
+- Engine.reset reuses KV buffers (a second multi-GiB allocation OOMed HBM at 64K).
+
+### Agentic serving
+
+- Recurrent-state checkpoints (~155 MiB each, in HBM): at prompt end, every 4096 tokens, at the start of
+  the conversation proper (after system prompt and tool schemas) and at the last message. A request resumes
+  from the nearest checkpoint at or before the first changed token; the KV cache rewinds for free.
+- OpenAI-compatible server (stdlib): tools -> tool_calls (model-native <tool_call><function=..> blocks),
+  reasoning_content, stop strings, cached-token usage, llama.cpp-style timings, /metrics.
+- Per-message tokenization cache (exact because <|im_start|> is a control token): host preparation of a
+  21K-token conversation takes 3-4 ms.
+- First tokens stream after 1, 2, 4, ... token blocks.
+- Reachable locally through `scripts/tunnel.sh` (OpenSSH over `colab ssh --proxy-mode`).
+- pi 1.5.0 (already installed on this machine; the installer was inspected, not re-run) drives the engine
+  with `PI_CODING_AGENT_DIR=pi-agent`: a write-file/run/report task finished in 3.8 s wall.
+- bench/agent_loop_client.py (12 turns, +1.9K tokens of tool output per turn, context to 21K): 23.5 s
+  total, 108K tokens served from state vs 20.9K fed, per-turn prefill 1.15-1.40 s, decode 62-69 tok/s,
+  all 11 planted values retrieved correctly (agent-loop-client.json). Turn time is dominated by prefilling
+  new tool output, so prefill throughput is the main lever for this workload.

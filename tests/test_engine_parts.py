@@ -201,3 +201,16 @@ def test_streaming_attention_matches_dense(dtype):
     p /= p.sum(-1, keepdims=True)
     ref = np.einsum('grs,gsd->grd', p, v.astype(np.float64))
     np.testing.assert_allclose(out, ref, rtol=2e-2 if dtype == 'bfloat16' else 1e-4, atol=2e-2 if dtype == 'bfloat16' else 1e-5)
+
+
+def test_segment_cached_chat_tokenization_is_exact(tokenizer):
+    msgs = [{'role': 'system', 'content': 'You are an agent. Ünïcödé ok.'},
+            {'role': 'user', 'content': 'Read the file  <tool_call> literally?\n\n  spaces  '},
+            {'role': 'assistant', 'content': 'def f(x):\n    return x * 2\n'},
+            {'role': 'user', 'content': 'thanks'}]
+    text = tokenizer.apply_chat_template(msgs, enable_thinking=False)
+    for _ in range(2):                       # second pass is served from the cache
+        ids, bounds = tokenizer.encode_chat(text)
+        assert ids == tokenizer.encode(text)
+    assert bounds[0] == 0 and len(bounds) == 5
+    assert all(ids[b] == tokenizer.tokens.index('<|im_start|>') for b in bounds)
