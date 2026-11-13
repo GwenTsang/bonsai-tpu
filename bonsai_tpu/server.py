@@ -290,6 +290,19 @@ def make_handler(engine, model_name, default_thinking=True, default_max_tokens=4
                 except (BrokenPipeError, ConnectionResetError):
                     gen.close()
                     return
+                except Exception as e:          # device failure mid-request: donated state may be gone
+                    gen.close()
+                    engine.hard_reset()
+                    totals['errors'] = totals.get('errors', 0) + 1
+                    err = {'error': {'message': '%s: %s' % (type(e).__name__, str(e)[:500]), 'type': 'server_error'}}
+                    try:
+                        if stream:
+                            self._sse(err)
+                        else:
+                            self._json(500, err)
+                    except (BrokenPipeError, ConnectionResetError):
+                        pass
+                    return
                 st = dict(engine.stats)
                 reasoning, content, tool_text = split.result()
                 calls = parse_tool_calls(tool_text, tools) if tool_text else []

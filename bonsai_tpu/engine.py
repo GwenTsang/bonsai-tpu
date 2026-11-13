@@ -121,6 +121,14 @@ class Engine:
         self.snapshots = []        # recurrent-state checkpoints, ascending position
         self._ngram, self._ngram_upto = {}, 0
 
+    def hard_reset(self):
+        """Rebuild all device state from scratch (after a failed device call left donated buffers invalid)."""
+        self.state = None
+        self.snapshots = []
+        import gc
+        gc.collect()
+        self.reset()
+
     # Agent loops resend the whole conversation with small edits (re-rendered tool calls, stripped
     # reasoning).  The KV cache is position-addressed, so rewinding it is free, but the recurrent (GDN and
     # convolution) state cannot be rolled back; checkpoints of it (~155 MiB each, kept in HBM) let a request
