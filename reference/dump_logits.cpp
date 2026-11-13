@@ -11,6 +11,7 @@
 struct Capture {
     std::string directory;
     int step=0;
+    int serial=0;
     std::ofstream manifest;
 };
 
@@ -22,12 +23,12 @@ static bool capture(ggml_tensor *t, bool ask, void *opaque) {
     if(ask) return selected;
     if(!selected) return true;
     for(char &v:name) if(!std::isalnum(static_cast<unsigned char>(v)) && v!='-' && v!='_') v='_';
-    const auto filename=std::to_string(c.step)+"_"+name+".bin";
+    const auto filename=std::to_string(c.step)+"_"+std::to_string(c.serial++)+"_"+name+".bin";
     std::vector<char> data(ggml_nbytes(t));
     ggml_backend_tensor_get(t,data.data(),0,data.size());
     std::ofstream f(c.directory+"/"+filename,std::ios::binary);
     f.write(data.data(),data.size());
-    c.manifest<<"{\"file\":\""<<filename<<"\",\"type\":"<<t->type<<",\"shape\":[";
+    c.manifest<<"{\"file\":\""<<filename<<"\",\"name\":\""<<name<<"\",\"step\":"<<c.step<<",\"type\":"<<t->type<<",\"shape\":[";
     for(int i=0;i<4;++i)c.manifest<<(i?",":"")<<t->ne[i];
     c.manifest<<"],\"strides\":[";
     for(int i=0;i<4;++i)c.manifest<<(i?",":"")<<t->nb[i];

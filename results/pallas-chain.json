@@ -1,0 +1,410 @@
+[
+ {
+  "variant": "pallas",
+  "M": 1,
+  "compile_s": 0.20293459699996674,
+  "per_matrix_ms": 0.20735125002602217,
+  "min_ms": 0.20184625003594192,
+  "max_ms": 0.2200937499878819,
+  "bm": 8,
+  "bk": 1024,
+  "bn": 256
+ },
+ {
+  "variant": "pallas",
+  "M": 1,
+  "compile_s": 0.24270706199968117,
+  "per_matrix_ms": 0.1636537500075974,
+  "min_ms": 0.15967000001637643,
+  "max_ms": 0.1684174999923016,
+  "bm": 8,
+  "bk": 1024,
+  "bn": 512
+ },
+ {
+  "variant": "pallas",
+  "M": 1,
+  "compile_s": 0.3406669310002144,
+  "per_matrix_ms": 0.14798137499383301,
+  "min_ms": 0.1448825000238685,
+  "max_ms": 0.156177500002741,
+  "bm": 8,
+  "bk": 1024,
+  "bn": 1024
+ },
+ {
+  "variant": "pallas",
+  "M": 1,
+  "compile_s": 0.5876790330003132,
+  "per_matrix_ms": 0.14058249996651284,
+  "min_ms": 0.13798000003362176,
+  "max_ms": 0.1511287500193248,
+  "bm": 8,
+  "bk": 1024,
+  "bn": 2176
+ },
+ {
+  "variant": "pallas",
+  "M": 1,
+  "error": "ValueError('Tiles must divide K,N; scale tiling requires K tiles divisible by 1024')",
+  "bm": 8,
+  "bk": 2560,
+  "bn": 1088
+ },
+ {
+  "variant": "pallas",
+  "M": 1,
+  "error": "ValueError(\"The Pallas TPU lowering currently requires that the last two dimensions of your block shape are divisible by 8 and 128 respectively, or be equal to the respective dimensions of the overall array. Block spec for args[1] in pallas_call body at /content/bonsai_tpu/pallas_matmul.py:27 has block shape (Blocked(block_size=320), Blocked(block_size=544)), array shape (320, 17408), and index_ma",
+  "bm": 8,
+  "bk": 5120,
+  "bn": 544
+ },
+ {
+  "variant": "pallas",
+  "M": 1,
+  "error": "ValueError(\"The Pallas TPU lowering currently requires that the last two dimensions of your block shape are divisible by 8 and 128 respectively, or be equal to the respective dimensions of the overall array. Block spec for args[1] in pallas_call body at /content/bonsai_tpu/pallas_matmul.py:27 has block shape (Blocked(block_size=320), Blocked(block_size=1088)), array shape (320, 17408), and index_m",
+  "bm": 8,
+  "bk": 5120,
+  "bn": 1088
+ },
+ {
+  "variant": "pallas",
+  "M": 1,
+  "compile_s": 0.19723537800018676,
+  "per_matrix_ms": 0.21584500001381457,
+  "min_ms": 0.2134223749976627,
+  "max_ms": 0.22371487500549847,
+  "bm": 16,
+  "bk": 1024,
+  "bn": 256
+ },
+ {
+  "variant": "pallas",
+  "M": 1,
+  "compile_s": 0.24888794199978292,
+  "per_matrix_ms": 0.16790612500017232,
+  "min_ms": 0.16414124996799728,
+  "max_ms": 0.17903874999092295,
+  "bm": 16,
+  "bk": 1024,
+  "bn": 512
+ },
+ {
+  "variant": "pallas",
+  "M": 1,
+  "compile_s": 0.3453357909997976,
+  "per_matrix_ms": 0.14924875000588145,
+  "min_ms": 0.1483836250031345,
+  "max_ms": 0.15675000003056994,
+  "bm": 16,
+  "bk": 1024,
+  "bn": 1024
+ },
+ {
+  "variant": "pallas",
+  "M": 1,
+  "compile_s": 0.5691740249999384,
+  "per_matrix_ms": 0.14060500001278342,
+  "min_ms": 0.13818499996887113,
+  "max_ms": 0.15675750000809785,
+  "bm": 16,
+  "bk": 1024,
+  "bn": 2176
+ },
+ {
+  "variant": "pallas",
+  "M": 1,
+  "error": "ValueError('Tiles must divide K,N; scale tiling requires K tiles divisible by 1024')",
+  "bm": 16,
+  "bk": 2560,
+  "bn": 1088
+ },
+ {
+  "variant": "pallas",
+  "M": 1,
+  "error": "ValueError(\"The Pallas TPU lowering currently requires that the last two dimensions of your block shape are divisible by 8 and 128 respectively, or be equal to the respective dimensions of the overall array. Block spec for args[1] in pallas_call body at /content/bonsai_tpu/pallas_matmul.py:27 has block shape (Blocked(block_size=320), Blocked(block_size=544)), array shape (320, 17408), and index_ma",
+  "bm": 16,
+  "bk": 5120,
+  "bn": 544
+ },
+ {
+  "variant": "pallas",
+  "M": 1,
+  "error": "ValueError(\"The Pallas TPU lowering currently requires that the last two dimensions of your block shape are divisible by 8 and 128 respectively, or be equal to the respective dimensions of the overall array. Block spec for args[1] in pallas_call body at /content/bonsai_tpu/pallas_matmul.py:27 has block shape (Blocked(block_size=320), Blocked(block_size=1088)), array shape (320, 17408), and index_m",
+  "bm": 16,
+  "bk": 5120,
+  "bn": 1088
+ },
+ {
+  "variant": "pallas",
+  "M": 8,
+  "compile_s": 0.19905263800001194,
+  "per_matrix_ms": 0.20550112503769924,
+  "min_ms": 0.20348250001234192,
+  "max_ms": 0.2134923749963491,
+  "bm": 8,
+  "bk": 1024,
+  "bn": 256
+ },
+ {
+  "variant": "pallas",
+  "M": 8,
+  "compile_s": 0.24208723199990345,
+  "per_matrix_ms": 0.1598237499820243,
+  "min_ms": 0.15720124997642415,
+  "max_ms": 0.18406737495979542,
+  "bm": 8,
+  "bk": 1024,
+  "bn": 512
+ },
+ {
+  "variant": "pallas",
+  "M": 8,
+  "compile_s": 0.3374390020003375,
+  "per_matrix_ms": 0.14273499999717387,
+  "min_ms": 0.14191125001161708,
+  "max_ms": 0.15878124997925624,
+  "bm": 8,
+  "bk": 1024,
+  "bn": 1024
+ },
+ {
+  "variant": "pallas",
+  "M": 8,
+  "compile_s": 0.5766256950000752,
+  "per_matrix_ms": 0.1390936250231789,
+  "min_ms": 0.13457250003057197,
+  "max_ms": 0.1507650000007743,
+  "bm": 8,
+  "bk": 1024,
+  "bn": 2176
+ },
+ {
+  "variant": "pallas",
+  "M": 8,
+  "error": "ValueError('Tiles must divide K,N; scale tiling requires K tiles divisible by 1024')",
+  "bm": 8,
+  "bk": 2560,
+  "bn": 1088
+ },
+ {
+  "variant": "pallas",
+  "M": 8,
+  "error": "ValueError(\"The Pallas TPU lowering currently requires that the last two dimensions of your block shape are divisible by 8 and 128 respectively, or be equal to the respective dimensions of the overall array. Block spec for args[1] in pallas_call body at /content/bonsai_tpu/pallas_matmul.py:27 has block shape (Blocked(block_size=320), Blocked(block_size=544)), array shape (320, 17408), and index_ma",
+  "bm": 8,
+  "bk": 5120,
+  "bn": 544
+ },
+ {
+  "variant": "pallas",
+  "M": 8,
+  "error": "ValueError(\"The Pallas TPU lowering currently requires that the last two dimensions of your block shape are divisible by 8 and 128 respectively, or be equal to the respective dimensions of the overall array. Block spec for args[1] in pallas_call body at /content/bonsai_tpu/pallas_matmul.py:27 has block shape (Blocked(block_size=320), Blocked(block_size=1088)), array shape (320, 17408), and index_m",
+  "bm": 8,
+  "bk": 5120,
+  "bn": 1088
+ },
+ {
+  "variant": "pallas",
+  "M": 32,
+  "compile_s": 0.2088472569998885,
+  "per_matrix_ms": 0.22879124998098632,
+  "min_ms": 0.22443124998972053,
+  "max_ms": 0.23682612504671852,
+  "bm": 32,
+  "bk": 1024,
+  "bn": 256
+ },
+ {
+  "variant": "pallas",
+  "M": 32,
+  "compile_s": 0.26473236999981964,
+  "per_matrix_ms": 0.1716987500230971,
+  "min_ms": 0.16916862500693242,
+  "max_ms": 0.17883999998957734,
+  "bm": 32,
+  "bk": 1024,
+  "bn": 512
+ },
+ {
+  "variant": "pallas",
+  "M": 32,
+  "compile_s": 0.364378927999951,
+  "per_matrix_ms": 0.15693875002398272,
+  "min_ms": 0.1506012500271936,
+  "max_ms": 0.17629612500513758,
+  "bm": 32,
+  "bk": 1024,
+  "bn": 1024
+ },
+ {
+  "variant": "pallas",
+  "M": 32,
+  "compile_s": 0.6253938189997825,
+  "per_matrix_ms": 0.14551987499089591,
+  "min_ms": 0.1439186249854174,
+  "max_ms": 0.1526300000023184,
+  "bm": 32,
+  "bk": 1024,
+  "bn": 2176
+ },
+ {
+  "variant": "pallas",
+  "M": 32,
+  "error": "ValueError('Tiles must divide K,N; scale tiling requires K tiles divisible by 1024')",
+  "bm": 32,
+  "bk": 2560,
+  "bn": 1088
+ },
+ {
+  "variant": "pallas",
+  "M": 32,
+  "error": "ValueError(\"The Pallas TPU lowering currently requires that the last two dimensions of your block shape are divisible by 8 and 128 respectively, or be equal to the respective dimensions of the overall array. Block spec for args[1] in pallas_call body at /content/bonsai_tpu/pallas_matmul.py:27 has block shape (Blocked(block_size=320), Blocked(block_size=544)), array shape (320, 17408), and index_ma",
+  "bm": 32,
+  "bk": 5120,
+  "bn": 544
+ },
+ {
+  "variant": "pallas",
+  "M": 32,
+  "error": "ValueError(\"The Pallas TPU lowering currently requires that the last two dimensions of your block shape are divisible by 8 and 128 respectively, or be equal to the respective dimensions of the overall array. Block spec for args[1] in pallas_call body at /content/bonsai_tpu/pallas_matmul.py:27 has block shape (Blocked(block_size=320), Blocked(block_size=1088)), array shape (320, 17408), and index_m",
+  "bm": 32,
+  "bk": 5120,
+  "bn": 1088
+ },
+ {
+  "variant": "pallas",
+  "M": 128,
+  "compile_s": 0.4375484509996568,
+  "per_matrix_ms": 0.31861375003927606,
+  "min_ms": 0.31412999999247404,
+  "max_ms": 0.32653125003889727,
+  "bm": 128,
+  "bk": 1024,
+  "bn": 256
+ },
+ {
+  "variant": "pallas",
+  "M": 128,
+  "compile_s": 0.48423394500014183,
+  "per_matrix_ms": 0.2396811249809616,
+  "min_ms": 0.2347212500239948,
+  "max_ms": 0.25548875004233196,
+  "bm": 128,
+  "bk": 1024,
+  "bn": 512
+ },
+ {
+  "variant": "pallas",
+  "M": 128,
+  "compile_s": 0.6851434929999414,
+  "per_matrix_ms": 0.1990987500448682,
+  "min_ms": 0.1971849999904407,
+  "max_ms": 0.21098237499472816,
+  "bm": 128,
+  "bk": 1024,
+  "bn": 1024
+ },
+ {
+  "variant": "pallas",
+  "M": 128,
+  "compile_s": 1.0629996190000384,
+  "per_matrix_ms": 0.18155999998725747,
+  "min_ms": 0.17574374999185238,
+  "max_ms": 0.19914124999331762,
+  "bm": 128,
+  "bk": 1024,
+  "bn": 2176
+ },
+ {
+  "variant": "pallas",
+  "M": 128,
+  "error": "ValueError('Tiles must divide K,N; scale tiling requires K tiles divisible by 1024')",
+  "bm": 128,
+  "bk": 2560,
+  "bn": 1088
+ },
+ {
+  "variant": "pallas",
+  "M": 128,
+  "error": "ValueError(\"The Pallas TPU lowering currently requires that the last two dimensions of your block shape are divisible by 8 and 128 respectively, or be equal to the respective dimensions of the overall array. Block spec for args[1] in pallas_call body at /content/bonsai_tpu/pallas_matmul.py:27 has block shape (Blocked(block_size=320), Blocked(block_size=544)), array shape (320, 17408), and index_ma",
+  "bm": 128,
+  "bk": 5120,
+  "bn": 544
+ },
+ {
+  "variant": "pallas",
+  "M": 128,
+  "error": "ValueError(\"The Pallas TPU lowering currently requires that the last two dimensions of your block shape are divisible by 8 and 128 respectively, or be equal to the respective dimensions of the overall array. Block spec for args[1] in pallas_call body at /content/bonsai_tpu/pallas_matmul.py:27 has block shape (Blocked(block_size=320), Blocked(block_size=1088)), array shape (320, 17408), and index_m",
+  "bm": 128,
+  "bk": 5120,
+  "bn": 1088
+ },
+ {
+  "variant": "pallas",
+  "M": 512,
+  "compile_s": 0.539881959000013,
+  "per_matrix_ms": 0.8709724999675927,
+  "min_ms": 0.8630461250049848,
+  "max_ms": 0.8847736249890659,
+  "bm": 256,
+  "bk": 1024,
+  "bn": 256
+ },
+ {
+  "variant": "pallas",
+  "M": 512,
+  "compile_s": 0.6264065189998291,
+  "per_matrix_ms": 0.7033111249938884,
+  "min_ms": 0.6999023750040578,
+  "max_ms": 0.7090536249734214,
+  "bm": 256,
+  "bk": 1024,
+  "bn": 512
+ },
+ {
+  "variant": "pallas",
+  "M": 512,
+  "compile_s": 0.8104107180001847,
+  "per_matrix_ms": 0.6241837500056135,
+  "min_ms": 0.6223798749829257,
+  "max_ms": 0.6307987500235868,
+  "bm": 256,
+  "bk": 1024,
+  "bn": 1024
+ },
+ {
+  "variant": "pallas",
+  "M": 512,
+  "compile_s": 1.4447677069997553,
+  "per_matrix_ms": 0.5786136250094387,
+  "min_ms": 0.5726298749664238,
+  "max_ms": 0.5890974999829268,
+  "bm": 256,
+  "bk": 1024,
+  "bn": 2176
+ },
+ {
+  "variant": "pallas",
+  "M": 512,
+  "error": "ValueError('Tiles must divide K,N; scale tiling requires K tiles divisible by 1024')",
+  "bm": 256,
+  "bk": 2560,
+  "bn": 1088
+ },
+ {
+  "variant": "pallas",
+  "M": 512,
+  "error": "ValueError(\"The Pallas TPU lowering currently requires that the last two dimensions of your block shape are divisible by 8 and 128 respectively, or be equal to the respective dimensions of the overall array. Block spec for args[1] in pallas_call body at /content/bonsai_tpu/pallas_matmul.py:27 has block shape (Blocked(block_size=320), Blocked(block_size=544)), array shape (320, 17408), and index_ma",
+  "bm": 256,
+  "bk": 5120,
+  "bn": 544
+ },
+ {
+  "variant": "pallas",
+  "M": 512,
+  "error": "ValueError(\"The Pallas TPU lowering currently requires that the last two dimensions of your block shape are divisible by 8 and 128 respectively, or be equal to the respective dimensions of the overall array. Block spec for args[1] in pallas_call body at /content/bonsai_tpu/pallas_matmul.py:27 has block shape (Blocked(block_size=320), Blocked(block_size=1088)), array shape (320, 17408), and index_m",
+  "bm": 256,
+  "bk": 5120,
+  "bn": 1088
+ }
+]

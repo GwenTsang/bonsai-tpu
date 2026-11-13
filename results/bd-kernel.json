@@ -1,0 +1,116 @@
+[
+ {
+  "mode": "bd",
+  "bk": 1024,
+  "bn": 1088,
+  "error": "ValueError(\"The Pallas TPU lowering currently requires that the last two dimensions of your block shape are divisible by 8 and 128 respectively, or be equal to the respective dimensions of the overall array. Block spec for args[1] in pallas_call body at /tmp/ipykernel_1659/2334635872.py:27 has block"
+ },
+ {
+  "mode": "bd",
+  "bk": 1024,
+  "bn": 2176,
+  "rel_l2": 3.242406205710995e-05,
+  "compile_s": 0.49,
+  "ms": 0.0634,
+  "min_ms": 0.0622
+ },
+ {
+  "mode": "bd",
+  "bk": 1024,
+  "bn": 4352,
+  "rel_l2": 3.242406205710995e-05,
+  "compile_s": 0.59,
+  "ms": 0.0605,
+  "min_ms": 0.058
+ },
+ {
+  "mode": "bd",
+  "bk": 1024,
+  "bn": 8704,
+  "rel_l2": 3.242406205710995e-05,
+  "compile_s": 0.76,
+  "ms": 0.0615,
+  "min_ms": 0.0604
+ },
+ {
+  "mode": "bd",
+  "bk": 1024,
+  "bn": 17408,
+  "rel_l2": 3.242406205710995e-05,
+  "compile_s": 1.13,
+  "ms": 0.0622,
+  "min_ms": 0.0596
+ },
+ {
+  "mode": "bd",
+  "bk": 5120,
+  "bn": 2176,
+  "rel_l2": 3.242216833486361e-05,
+  "compile_s": 1.23,
+  "ms": 0.0828,
+  "min_ms": 0.08
+ },
+ {
+  "mode": "bd",
+  "bk": 5120,
+  "bn": 4352,
+  "rel_l2": 3.242216833486361e-05,
+  "compile_s": 2.24,
+  "ms": 0.0844,
+  "min_ms": 0.0825
+ },
+ {
+  "mode": "read",
+  "bk": 1024,
+  "bn": 1088,
+  "error": "ValueError(\"The Pallas TPU lowering currently requires that the last two dimensions of your block shape are divisible by 8 and 128 respectively, or be equal to the respective dimensions of the overall array. Block spec for args[1] in pallas_call body at /tmp/ipykernel_1659/2334635872.py:27 has block"
+ },
+ {
+  "mode": "read",
+  "bk": 1024,
+  "bn": 2176,
+  "compile_s": 0.34,
+  "ms": 0.0615,
+  "min_ms": 0.0591
+ },
+ {
+  "mode": "read",
+  "bk": 1024,
+  "bn": 4352,
+  "compile_s": 0.36,
+  "ms": 0.0682,
+  "min_ms": 0.0658
+ },
+ {
+  "mode": "read",
+  "bk": 1024,
+  "bn": 8704,
+  "compile_s": 0.36,
+  "ms": 0.0649,
+  "min_ms": 0.0608
+ },
+ {
+  "mode": "read",
+  "bk": 1024,
+  "bn": 17408,
+  "compile_s": 0.34,
+  "ms": 0.0613,
+  "min_ms": 0.0602
+ },
+ {
+  "mode": "read",
+  "bk": 5120,
+  "bn": 2176,
+  "compile_s": 0.55,
+  "ms": 0.061,
+  "min_ms": 0.0601
+ },
+ {
+  "mode": "read",
+  "bk": 5120,
+  "bn": 4352,
+  "compile_s": 0.56,
+  "ms": 0.062,
+  "min_ms": 0.0598
+ }
+]
