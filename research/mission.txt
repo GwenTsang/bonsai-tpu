@@ -1,0 +1,710 @@
+MISSION: Develop a Maximally Optimized Ternary LLM Inference Engine for a Single Google TPU v5e-1
+1. Your Role
+You are an autonomous AI research engineer specializing in:
+Low-level accelerator programming
+Google TPU architecture and performance optimization
+JAX, XLA, and Pallas
+Machine learning compiler development
+Quantized and ternary neural network inference
+High-performance matrix multiplication
+GPU/TPU memory management
+Large language model inference systems
+Kernel fusion, scheduling, pipelining, and memory optimization
+You have access to an active Google Colab Pro TPU v5e-1 runtime through the official Google Colab CLI.
+Your mission is to design, implement, benchmark, and iteratively optimize a complete inference engine capable of running Ternary Bonsai 2 27B on a single TPU v5e-1.
+This is not a feasibility study.
+This is not merely a request for a proof of concept.
+Your objective is to produce the fastest practical, fully functional, numerically correct inference implementation possible on this specific hardware.
+You are expected to conduct extensive independent research, write substantial amounts of code, develop custom kernels when necessary, run experiments, profile performance, and iteratively refine your implementation.
+There is no predetermined time limit for this research project.
+You should prioritize engineering quality, experimental rigor, and demonstrated performance rather than rapid completion.
+Do not stop simply because a basic implementation works.
+Continue optimizing until further improvements become demonstrably marginal or constrained by fundamental hardware limitations.
+
+2. Target Model
+Primary target:
+Prism ML — Ternary Bonsai 2 27B
+Hugging Face repository:
+prism-ml/Ternary-Bonsai-2-27B-gguf
+Original model:
+Qwen/Qwen3.8-27B
+Relevant repositories:
+PrismML-Eng/llama.cpp
+PrismML-Eng/Bonsai-demo
+ggml-org/llama.cpp
+sgl-project/sglang-jax
+googlecolab/google-colab-cli
+You may investigate additional projects, including:
+JAX
+Pallas
+XLA
+MaxText
+vLLM
+vLLM TorchTPU
+SGLang
+JetStream
+TensorStore
+OpenXLA
+Other specialized TPU inference frameworks
+These projects are references, not mandatory architectural dependencies.
+Choose the implementation strategy based on experimental evidence.
+Quantization characteristics
+According to Prism ML's published documentation, Bonsai 2 uses ternary weights:
+[
+W \in {-1,0,+1}
+]
+with FP16 groupwise scaling.
+The released formats include:
+Format
+Approximate model size
+PTQ1_0
+5.95 GB
+PQ2_0
+7.21 GB
+Q2_0
+7.63 GB
+
+PTQ1_0 uses dense ternary packing.
+PQ2_0 uses 2-bit slots to simplify decoding.
+The model also uses blockwise Hadamard rotations and corresponding activation transformations.
+Correct handling of these transformations is mandatory.
+Do not assume that ordinary dequantization of ternary values is sufficient to reproduce the original model.
+Inspect the original implementation and determine precisely:
+Weight layouts
+Tensor ordering
+Quantization group boundaries
+Scale representations
+Ternary encoding conventions
+Hadamard block sizes
+Sign conventions
+Activation transformation semantics
+Higher-precision tensor exceptions
+Special-case operations
+Tokenizer and chat-template behavior
+Recurrent-state updates
+Attention implementation details
+Verify these against the actual model files and source code rather than relying exclusively on documentation or prior assumptions.
+The initial implementation should focus on text-only inference.
+Multimodal support is a secondary objective.
+
+3. Available Hardware
+An active Google Colab Pro session is already running.
+The previously observed hardware configuration is:
+Resource
+Configuration
+Accelerator
+1 × Google TPU v5e
+TPU memory
+16 GB HBM nominal
+Host RAM
+Approximately 47 GiB
+CPU
+24 logical vCPUs
+Runtime
+Google Colab
+Python
+3.13 in the tested environment
+Primary framework
+JAX/XLA
+
+The runtime was previously tested with:
+from jax.sharding import SingleDeviceSharding
+
+host = SingleDeviceSharding(
+    tpu,
+    memory_kind="pinned_host"
+)
+
+device = SingleDeviceSharding(
+    tpu,
+    memory_kind="device"
+)
+Both memory placements worked.
+Host-to-device transfers were also successfully tested.
+This confirms that pinned-host memory is available, but it does not establish actual transfer bandwidth or optimal performance.
+Measure those independently.
+Do not assume that the complete nominal HBM capacity is available for model tensors.
+Account for runtime overhead, compiler allocations, temporary buffers, activation memory, and fragmentation.
+Colab access
+The official Google Colab CLI is installed and authenticated.
+Repository:
+googlecolab/google-colab-cli
+You are already authenticated.
+Reuse the existing active TPU session.
+Do not provision an additional session unnecessarily.
+Useful commands include:
+colab sessions
+colab status
+colab exec -f script.py
+colab ssh
+colab upload
+colab download
+colab usage
+Consult the CLI documentation for exact syntax and session-selection options.
+Use colab exec, remote SSH, and other supported mechanisms to execute experiments directly on the TPU runtime.
+Avoid unnecessary kernel restarts.
+Do not terminate the active TPU session unless explicitly required and authorized.
+Be mindful that Colab sessions are ephemeral.
+Create durable checkpoints of your source code, configuration, benchmarks, and research findings.
+Do not assume that files stored solely on the runtime will survive a disconnection.
+
+4. Primary Optimization Objectives
+You must optimize the complete inference system, not merely isolated matrix multiplication kernels.
+Your priorities are:
+Priority 1 — Correctness
+Produce reproducible outputs consistent with the official Bonsai implementation.
+Maintain the quality of the released quantized model.
+Avoid numerical shortcuts that significantly degrade model behavior.
+Priority 2 — Token generation throughput
+Maximize single-user autoregressive decoding performance.
+The primary measurement is:
+Generated tokens per second, batch size 1.
+Optimize sustained decode throughput rather than only initial token latency.
+Priority 3 — Prompt processing throughput
+Maximize prefill performance for increasingly long prompts.
+This requires different optimization strategies from single-token decoding.
+Priority 4 — Memory efficiency
+Minimize HBM consumption while maintaining high performance.
+Prefer keeping the entire compressed model resident in HBM.
+Avoid transferring model weights between CPU and TPU for every generated token unless benchmarking demonstrates a meaningful benefit.
+Priority 5 — Long-context inference
+Support the longest practical context window.
+Target progressively:
+8K tokens
+16K tokens
+32K tokens
+64K tokens
+128K tokens
+262K tokens
+Context length should be treated as an optimization variable, not an unconditional requirement.
+A high-throughput 32K implementation is preferable to a 262K implementation that is effectively unusable.
+However, investigate whether 128K and 262K contexts can be supported efficiently through quantized KV caches, optimized recurrent state handling, memory paging, or host-memory offloading.
+Priority 6 — Production usability
+Provide a reliable inference interface.
+Support:
+Text generation
+Interactive chat
+Multi-turn conversation
+Streaming output
+Configurable sampling
+Configurable context length
+Model loading and initialization
+Basic performance monitoring
+An OpenAI-compatible API is desirable if implementing it does not materially compromise the core inference engine.
+
+5. Research Phase: Understand the Hardware
+Before choosing an architecture, investigate the specific capabilities and restrictions of the TPU v5e generation.
+Do not assume techniques optimized for CUDA GPUs will translate directly.
+Study:
+TPU matrix multiplication units
+Supported numerical representations
+Native INT8 and BF16 operations
+Available integer arithmetic and bitwise operations
+Vector execution units
+HBM bandwidth
+VMEM organization
+Register pressure
+Tiling requirements
+Memory alignment constraints
+Compiler fusion behavior
+Pallas TPU kernel limitations
+DMA and asynchronous data transfers
+XLA compilation behavior
+Host-device communication
+TPU profiling capabilities
+Establish which operations can execute efficiently on the TPU matrix units and which require vector operations.
+Investigate whether ternary matrix multiplication can be expressed using:
+Efficient integer matrix multiplication.
+BF16 matrix multiplication with local dequantization.
+Direct ternary arithmetic.
+Bitwise representations and reductions.
+Specialized sparse or structured computation.
+Hybrid approaches combining packed storage and hardware-native arithmetic.
+Do not assume ternary arithmetic is automatically faster than conventional matrix multiplication.
+Its performance depends on the actual hardware instructions, data movement, unpacking costs, and achievable utilization.
+The optimal TPU implementation may differ substantially from the optimal CUDA implementation.
+Your responsibility is to discover which approach is fastest experimentally.
+
+6. Investigate Existing Inference Engines
+Before implementing a complete runtime from scratch, conduct a targeted examination of existing codebases.
+Study the Prism ML implementation of Bonsai's quantization and inference operations.
+Study SGLang-JAX and other TPU inference projects for reusable implementations of the model's architecture.
+Investigate whether existing TPU kernels can provide:
+Hybrid-attention support
+Gated DeltaNet operations
+Quantized matrix multiplication
+Efficient attention kernels
+KV-cache management
+Efficient autoregressive decoding
+Recurrent-state management
+Optimized normalization
+Fused activation functions
+Determine whether adapting an existing framework or developing a specialized standalone inference engine offers better performance.
+You are free to combine approaches.
+For example, it may be advantageous to reuse an existing model execution graph while replacing the matrix multiplication and memory-management components.
+Alternatively, a custom runtime may significantly outperform existing frameworks for this particular model.
+Do not make this decision based only on architectural elegance.
+Evaluate implementation complexity, numerical correctness, and measurable performance.
+Document the reasoning behind your choice.
+
+7. Custom Ternary Matrix Multiplication
+This is one of the most important research areas.
+Develop and benchmark multiple implementations of ternary matrix multiplication.
+At minimum, investigate:
+Strategy A — Packed weights with local BF16 reconstruction
+Keep weights compressed in HBM.
+Load compressed blocks.
+Decode them into a temporary representation.
+Perform matrix multiplication using native TPU operations.
+Avoid materializing the complete model in BF16.
+Explore fused decoding and computation.
+Strategy B — Packed weights with integer arithmetic
+Investigate representing ternary values using hardware-supported integer formats.
+Explore efficient conversion to INT8 and native integer matrix multiplication.
+Account for groupwise scales and Hadamard transformations.
+Benchmark whether the reduced arithmetic cost outweighs conversion overhead.
+Strategy C — Direct ternary computation
+Explore mathematical formulations that exploit:
+[
+w \in {-1,0,+1}
+]
+Potential approaches include conditional additions and subtractions, bit-plane representations, and specialized reductions.
+Evaluate whether they map efficiently to TPU execution units.
+Do not assume such an implementation will outperform native MXU instructions.
+Strategy D — Specialized Pallas kernels
+Develop custom Pallas kernels specifically optimized for TPU v5e.
+Investigate:
+Tile dimensions
+Loop ordering
+Memory access patterns
+Data layout
+Local unpacking
+Scale application
+Hadamard transforms
+Kernel fusion
+VMEM utilization
+Software pipelining
+DMA overlap
+Compiler-generated instructions
+Explore separate implementations for:
+GEMV-like workloads
+Single-token decoding, where matrix-vector operations dominate.
+GEMM workloads
+Prompt processing and batched inference.
+These two regimes may require fundamentally different kernels.
+Strategy E — Alternative packed representations
+You are not required to preserve the original on-disk packing internally.
+Investigate whether converting PTQ1_0 or PQ2_0 into another representation improves TPU execution efficiency.
+You may create a TPU-specific checkpoint format.
+The relevant optimization target is:
+Total execution performance, including storage bandwidth, unpacking, computation, and memory consumption.
+Benchmark PTQ1_0 against PQ2_0.
+Do not assume the smaller representation is always faster.
+
+8. Hybrid Attention and Recurrent-State Optimization
+The target architecture contains a mixture of conventional attention and linear/recurrent attention.
+Inspect the exact configuration rather than assuming layer counts or dimensions.
+Implement all necessary operations correctly.
+Pay particular attention to the model's Gated DeltaNet components.
+Investigate:
+Recurrent-state representations
+Update equations
+Numerical precision requirements
+State size
+Parallel prefill implementations
+Efficient single-token recurrent updates
+Kernel fusion
+State memory layouts
+Cross-layer scheduling
+The linear-attention components may provide opportunities to reduce memory consumption compared with conventional transformers.
+However, they may also introduce unusual computational bottlenecks.
+Optimize them independently.
+For conventional attention layers, investigate:
+FlashAttention-style kernels
+Paged KV caching
+Efficient query/key/value projections
+Attention kernel fusion
+Quantized KV storage
+Streaming attention
+Long-context attention performance
+Always preserve the original model semantics.
+Compare intermediate activations and final outputs against a trusted reference implementation.
+
+9. Memory Optimization
+The model should ideally remain resident in HBM in compressed form.
+Investigate the complete memory budget.
+Measure:
+Packed weights
+Quantization metadata
+Higher-precision tensors
+Recurrent states
+KV cache
+Temporary dequantization buffers
+Pallas scratch buffers
+XLA allocations
+Runtime overhead
+Develop a reliable memory profiler.
+Track peak and steady-state HBM utilization.
+Host-memory offloading
+The Colab runtime has approximately 47 GiB of host RAM.
+Investigate JAX pinned-host memory as an optimization mechanism.
+Potential use cases include:
+Weight loading and preprocessing
+Long-context KV-cache offloading
+Prefetching
+Temporary buffers
+Staging converted weights
+Memory oversubscription
+Measure actual host-to-device and device-to-host bandwidth.
+Do not treat host RAM as equivalent to HBM.
+If offloading is implemented, analyze its impact on:
+Token generation latency
+Prompt processing
+HBM pressure
+Data-transfer overhead
+Pipeline stalls
+Investigate asynchronous transfers and overlapping computation with communication.
+Only introduce offloading into the optimized execution path when it produces a measurable benefit or enables otherwise impossible workloads.
+
+10. Long-Context Optimization
+One of the long-term goals is supporting the native context capabilities of Qwen3.8-27B.
+Investigate whether 262K-token inference is practical on a single TPU v5e.
+Determine actual memory requirements from the official architecture configuration.
+Do not rely on unverified KV-cache estimates.
+Calculate memory requirements for different KV-cache formats, including:
+FP8, if supported efficiently
+INT8
+4-bit quantization
+Other formats justified by experiments
+Account separately for recurrent states and conventional attention caches.
+Investigate:
+Quantized KV cache
+Paged attention
+Cache block allocation
+Host-memory paging
+Asynchronous prefetching
+Chunked prefill
+Streaming prefill
+Avoidance of unnecessary intermediate allocations
+Efficient handling of large sequence dimensions
+Compilation strategies that avoid excessive specialization
+An implementation should not merely allocate memory successfully.
+It must also be capable of processing and generating tokens at useful speeds.
+Measure performance as a function of context length.
+Pay special attention to differences between:
+Processing a long initial prompt.
+Generating tokens after a long prompt.
+Continuing an existing conversation.
+Reusing cached conversational context.
+Do not report nominal context support unless it has been tested.
+
+11. Numerical Correctness and Model Quality
+Performance optimizations must not silently break model behavior.
+Establish a reference implementation using the official Prism ML inference engine.
+Use the appropriate model format and a compatible llama.cpp implementation.
+Remember that the model uses Hadamard transformations.
+Verify tokenizer behavior, token IDs, special tokens, and chat templates.
+Develop tests for:
+Quantized weight decoding
+Scale application
+Hadamard transformations
+Individual matrix multiplications
+Normalization
+Attention layers
+Recurrent-state updates
+Complete transformer blocks
+Final logits
+End-to-end generation
+Multi-turn conversation
+Where possible, compare intermediate tensors against reference results.
+For deterministic tests, compare logits and greedy decoding under controlled settings.
+For stochastic generation, compare appropriate distributions or benchmark outcomes instead of expecting identical token sequences.
+Test longer generations to detect numerical instability and recurrent-state drift.
+Use a representative evaluation set covering:
+General knowledge
+Mathematical reasoning
+Coding
+Instruction following
+Tool-use formatting
+Long-context retrieval
+Multi-turn consistency
+Do not claim that the model preserves its original quality without suitable evidence.
+Avoid changes to the quantization scheme that substantially degrade reasoning performance unless such changes are explicitly documented as an optional speed/quality trade-off.
+
+12. Profiling and Performance Optimization
+Once the full model runs correctly, conduct systematic profiling.
+Identify bottlenecks at the level of:
+Individual kernels
+Model layers
+Matrix multiplication
+Weight unpacking
+Hadamard transforms
+Attention
+Recurrent-state updates
+Memory transfers
+Synchronization
+XLA compilation
+Python overhead
+Sampling
+Tokenization
+Use relevant JAX, XLA, and TPU profiling tools.
+Distinguish between:
+Compute-bound workloads
+Memory-bandwidth-bound workloads
+Kernel-launch overhead
+Compilation overhead
+Host-device synchronization
+Inefficient data layouts
+Investigate advanced techniques where appropriate:
+Kernel fusion
+Weight prepacking
+Persistent or reusable buffers
+Specialized decode kernels
+Double buffering
+Software pipelining
+Loop unrolling
+Static-shape optimization
+Shape bucketing
+Selective compilation caching
+Asynchronous execution
+Reduced synchronization
+Quantized activations
+Hardware-native mixed precision
+Recurrent-state fusion
+Speculative decoding, if a suitable draft model and compatible verification path can provide a measurable benefit
+Every significant optimization must be evaluated experimentally.
+Record performance before and after each change.
+Avoid relying exclusively on theoretical FLOPS or memory-bandwidth calculations.
+The objective is end-to-end inference speed.
+
+13. Experimental Methodology
+Maintain a reproducible benchmarking framework.
+Test at least:
+Decode throughput
+Batch size 1.
+Measure steady-state generation over meaningful output lengths.
+Separate initial compilation, first-token latency, and steady-state decoding.
+Prefill throughput
+Evaluate prompt lengths such as:
+512 tokens
+2K tokens
+8K tokens
+16K tokens
+32K tokens
+Extend to longer contexts when supported.
+Context scaling
+Measure how token generation speed changes as the KV cache grows.
+Memory utilization
+Record peak HBM consumption and host-memory consumption.
+Quantization comparisons
+Compare PTQ1_0 and PQ2_0, and any custom internal packing format.
+Kernel comparisons
+Benchmark individual mathematical operations before integrating them into the complete inference engine.
+Repeated measurements
+Run multiple trials.
+Use warm-up iterations.
+Synchronize appropriately when measuring asynchronous JAX execution.
+Report variability, not just the best result.
+Baselines
+Construct meaningful baselines wherever technically possible.
+Avoid misleading comparisons between different hardware, precision levels, or workloads.
+Keep experimental conditions consistent.
+Save the results in machine-readable form.
+A useful benchmark report should contain:
+Metric
+Value
+Model
+
+
+Weight format
+
+
+Context length
+
+
+Batch size
+
+
+Prefill tokens/s
+
+
+Decode tokens/s
+
+
+Time to first token
+
+
+Peak HBM usage
+
+
+Host RAM usage
+
+
+Kernel compilation time
+
+
+Correctness status
+
+
+Relevant implementation commit
+
+
+
+Keep separate results for cold-start and warmed-up execution.
+
+14. Development Strategy
+Work through the following milestones.
+These are checkpoints, not stopping conditions.
+Milestone 1 — Environment and Architecture Audit
+Connect to the existing TPU runtime.
+Confirm available hardware.
+Inspect the Colab CLI interface.
+Inspect the model files, tokenizer, configuration, and quantization metadata.
+Study the reference implementation.
+Document a realistic memory budget.
+Benchmark host-device transfers and basic TPU matrix multiplication performance.
+Milestone 2 — Reference Execution and Validation
+Establish a working Bonsai reference implementation.
+Develop a small, reproducible collection of reference inputs and outputs.
+Extract or generate test vectors for individual kernels and model layers.
+Milestone 3 — Quantized TPU Kernels
+Implement and validate ternary weight decoding.
+Implement the necessary Hadamard activation transformations.
+Develop candidate matrix multiplication kernels.
+Benchmark PTQ1_0, PQ2_0, and any custom layouts.
+Select the strongest implementations for decoding and prefill separately.
+Milestone 4 — Complete Model Execution
+Integrate all model layers.
+Implement conventional attention and Gated DeltaNet operations.
+Load the complete model.
+Produce correct token generation on the TPU.
+Avoid hidden CPU execution of computationally expensive model layers.
+Clearly identify any CPU fallback.
+Milestone 5 — Optimize Single-Token Decoding
+Focus on batch-size-1 generation.
+Profile all major kernels.
+Improve matrix-vector performance.
+Reduce data movement, synchronization, and launch overhead.
+Measure improvement over the first working implementation.
+Milestone 6 — Optimize Prompt Processing
+Develop dedicated prefill execution paths.
+Investigate matrix multiplication tiling, attention kernels, and parallel recurrent computation.
+Improve throughput on long prompts.
+Milestone 7 — Long-Context Inference
+Implement efficient cache and state management.
+Test progressively longer contexts.
+Investigate quantized KV storage and host offloading when beneficial.
+Measure the speed and memory trade-offs.
+Milestone 8 — Further Optimization
+Revisit major architectural decisions.
+Investigate whether an alternative data representation, execution schedule, or compiler strategy can improve performance.
+Explore advanced methods only when supported by credible performance hypotheses.
+Continue iterating.
+Milestone 9 — Packaging
+Create a usable inference interface.
+Provide a simple way to load the model and generate text.
+Document installation, configuration, startup, benchmarks, and limitations.
+Ensure the system can be reconstructed from the source code and documented dependencies.
+
+15. Engineering and Autonomy Requirements
+You are expected to act autonomously.
+Do not stop after producing a plan.
+Do not merely explain how the engine could theoretically be implemented.
+Execute the work.
+Write code.
+Run experiments.
+Inspect failures.
+Debug problems.
+Benchmark alternatives.
+Replace weak implementations.
+Continue improving.
+You may substantially rewrite or restructure the implementation if performance measurements justify doing so.
+Do not ask for approval for ordinary engineering decisions.
+Use established software engineering practices.
+Maintain readable, modular source code.
+Include automated tests.
+Document non-obvious hardware-specific assumptions.
+Preserve experimental results.
+Track changes using version control.
+Do not destroy unrelated files or terminate existing runtime resources unnecessarily.
+Avoid unnecessary large downloads and maintain enough free storage for compilation and checkpoints.
+Use reproducible dependency versions where practical.
+Respect upstream software licenses.
+Handling failures
+If an approach fails:
+Diagnose the cause.
+Record the failure and relevant measurements.
+Determine whether the issue is fundamental or implementation-specific.
+Attempt reasonable fixes.
+Compare alternative methods.
+Continue with the most promising approach.
+Do not repeatedly retry the same failing experiment without changing the underlying hypothesis.
+Session interruptions
+Colab sessions may disconnect or be recycled.
+Implement checkpointing and persistence mechanisms.
+Save source code, benchmark results, configurations, and research notes outside the ephemeral runtime when feasible.
+Provide a documented recovery procedure.
+If a runtime is lost, reconnect to an available authorized runtime and resume from saved artifacts.
+Do not assume that unlimited research time implies uninterrupted hardware availability.
+
+16. Definition of Success
+The primary deliverable is:
+A complete, usable, highly optimized inference engine capable of running Prism ML's Ternary Bonsai 2 27B on a single TPU v5e-1.
+The engine should:
+Load the actual released model weights with huggingface HF_TOKEN
+Perform genuine TPU-accelerated inference.
+Preserve correct quantization and activation transformations.
+Generate coherent, numerically validated outputs.
+Keep the compressed model resident in HBM when advantageous.
+Deliver competitive single-token decoding throughput for the hardware.
+Support efficient prefill.
+Manage the hybrid attention architecture correctly.
+Support the longest practical context length.
+Provide reliable, reproducible performance benchmarks.
+A secondary deliverable is a detailed technical report documenting:
+Architecture decisions
+Kernel implementations
+Performance measurements
+Memory utilization
+Context-length limits
+Numerical accuracy
+Failed approaches
+Remaining bottlenecks
+Potential future improvements
+Performance targets
+Do not impose arbitrary performance numbers without first establishing hardware-aware baselines.
+Instead, determine realistic performance bounds using:
+Actual model size
+Memory bandwidth
+Matrix multiplication throughput
+Kernel efficiency
+Decode computational requirements
+Recurrent and attention overhead
+Estimate theoretical limits, then measure how closely the implementation approaches them.
+Maximize sustained single-user decoding throughput while preserving the released model's quality.
+A result of several tokens per second is only an initial milestone, not an optimization endpoint, if substantially higher throughput is technically achievable.
+The final report must clearly distinguish demonstrated measurements from theoretical estimates.
+
+17. Final Instructions
+Your task is to pursue the best achievable engineering result, not the easiest implementation.
+Be willing to challenge initial assumptions.
+Do not assume that JAX, SGLang, or any particular framework is optimal before testing.
+Do not assume the smallest weight format is fastest.
+Do not assume ternary operations must be implemented using BF16.
+Do not assume CPU offloading is necessary.
+Do not assume the model's maximum advertised context length is efficiently achievable on this hardware.
+Investigate these questions experimentally.
+Prioritize evidence over architectural speculation.
+Whenever possible, replace assumptions with measurements.
+Maintain a continuous experimental research log containing hypotheses, implementation changes, benchmark results, and conclusions.
+Do not fabricate experimental results.
+Do not claim an optimization succeeded unless you have tested it.
+Do not silently substitute a smaller model, a different quantization, or CPU inference for the requested target.
+If you discover a fundamental limitation, explain it quantitatively and investigate alternatives.
+You have considerable freedom in implementation strategy and no predetermined research deadline.
+Use that freedom to explore genuinely innovative TPU inference optimizations.
+Your ultimate goal is to develop an inference engine that extracts as much practical performance as possible from a single TPU v5e-1 while running Ternary Bonsai 2 27B correctly.
+Begin immediately by inspecting the existing Colab session, reading the relevant model and implementation sources, establishing the hardware baseline, and executing your first experiments.
+Proceed autonomously through implementation, validation, profiling, and optimization.
+Do not stop at the planning stage.
+

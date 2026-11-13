@@ -1,0 +1,5 @@
+upstream/
+__pycache__/
+.venv/
+*.gguf
+*.npy

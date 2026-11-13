@@ -1,0 +1,132 @@
+{
+  "python": "3.13.18",
+  "jax": "0.11.2",
+  "devices": [
+    "TPU_0(process=0,(0,0,0,0))"
+  ],
+  "device_kind": "TPU v5 lite",
+  "cpu_count": 24,
+  "memory_before": {
+    "num_allocs": 1,
+    "bytes_in_use": 26624,
+    "peak_bytes_in_use": 26624,
+    "largest_alloc_size": 26624,
+    "bytes_limit": 16909336064,
+    "bytes_reserved": 0,
+    "peak_bytes_reserved": 0,
+    "bytes_reservable_limit": 16909336064,
+    "largest_free_block_bytes": 16909309440
+  },
+  "measurements": [
+    {
+      "name": "matmul_<class 'jax.numpy.bfloat16'>",
+      "cold_seconds": 0.5724820460000046,
+      "seconds": [
+        0.00031827999998768064,
+        0.00030442899992522143,
+        0.0003055089999861593,
+        0.00030277999996997096,
+        0.00029510900003515417,
+        0.0003066909999915879,
+        0.0002931090000402037
+      ],
+      "median_seconds": 0.00030442899992522143,
+      "shape": [
+        2048,
+        2048,
+        2048
+      ]
+    },
+    {
+      "name": "matmul_<class 'jax.numpy.int8'>",
+      "cold_seconds": 0.687790758999995,
+      "seconds": [
+        0.00034357999993517296,
+        0.0002860899999177491,
+        0.0003128099999685219,
+        0.0002820099999780723,
+        0.00030628000001797773,
+        0.00030403000005208014,
+        0.0002619299999651048
+      ],
+      "median_seconds": 0.00030403000005208014,
+      "shape": [
+        2048,
+        2048,
+        2048
+      ]
+    },
+    {
+      "name": "pinned_host_to_device",
+      "cold_seconds": 0.029881196000019372,
+      "seconds": [
+        0.001455810000038582,
+        0.0013554699999076547,
+        0.001345990000004349,
+        0.0013481590000310462,
+        0.0013430200000357218,
+        0.001354050000031748,
+        0.0013433599999643775
+      ],
+      "median_seconds": 0.0013481590000310462,
+      "bytes": 16777216
+    },
+    {
+      "name": "device_to_pinned_host",
+      "cold_seconds": 0.006111028999953305,
+      "seconds": [
+        0.008234787999981563,
+        0.006840487999966172,
+        0.006081508999955076,
+        0.00629224899989822,
+        0.005639658999939456,
+        0.006261078999955316,
+        0.005598609000003307
+      ],
+      "median_seconds": 0.006261078999955316,
+      "bytes": 16777216
+    },
+    {
+      "name": "pinned_host_to_device",
+      "cold_seconds": 0.04206917400006205,
+      "seconds": [
+        0.01005338799996025,
+        0.00967018900007588,
+        0.009685217999958695,
+        0.009682508999958372,
+        0.009710348999988128,
+        0.009677678000002743,
+        0.009730998000009095
+      ],
+      "median_seconds": 0.009685217999958695,
+      "bytes": 134217728
+    },
+    {
+      "name": "device_to_pinned_host",
+      "cold_seconds": 0.03523997499996767,
+      "seconds": [
+        0.05778483100004905,
+        0.06421263000004274,
+        0.0886727779999319,
+        0.09646113499991316,
+        0.09611356499999602,
+        0.10178600500000812,
+        0.13469479100001536
+      ],
+      "median_seconds": 0.09611356499999602,
+      "bytes": 134217728
+    }
+  ],
+  "memory_after": {
+    "num_allocs": 4,
+    "bytes_in_use": 143360,
+    "peak_bytes_in_use": 268578816,
+    "largest_alloc_size": 134217728,
+    "bytes_limit": 16909336064,
+    "bytes_reserved": 0,
+    "peak_bytes_reserved": 0,
+    "bytes_reservable_limit": 16909336064,
+    "largest_free_block_bytes": 16896681472
+  },
+  "host_meminfo": "MemTotal:       49334440 kB\nMemFree:        39406248 kB\nMemAvailable:   42375640 kB\nBuffers:          367364 kB\nCached:          2664936 kB\nSwapCached:            0 kB\nActive:          1075828 kB\nInactive:        7815112 kB\nActive(anon):       2132 kB\nInactive(anon):  5859944 kB\nActive(file):    1073696 kB\nInactive(file):  1955168 kB\nUnevictable:          12 kB\nMlocked:              12 kB\nSwapTotal:             0 kB\nSwapFree:              0 kB\nDirty:              3692 kB\nWriteback:             0 kB\nAnonPages:       5856792 kB\nMapped:           867580 kB\nShmem:              3420 kB\nKReclaimable:     536788 kB\nSlab:             651832 kB\nSReclaimable:     536788 kB\nSUnreclaim:       115044 kB\nKernelStack:       19904 kB\nPageTables:        43100 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    24667220 kB\nCommitted_AS:   14604944 kB\nVmallocTotal:   34359738367 kB\nVmallocUsed:       26464 kB\nVmallocChunk:          0 kB\nPercpu:            14880 kB\nHardwareCorrupted:     0 kB\nAnonHugePages:     12288 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nCmaTotal:              0 kB\nCmaFree:               0 kB\nUnaccepted:            0 kB\nHugePages_Total:       0\nHugePages_Free:        0\nHugePages_Rsvd:        0\nHugePages_Surp:        0\nHugepagesize:       2048 kB\nHugetlb:               0 kB\nDirectMap4k:      154400 kB\nDirectMap2M:    12425216 kB\nDirectMap1G:    39845888 kB\n"
+}
