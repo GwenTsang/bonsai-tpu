@@ -1,7 +1,7 @@
 exec(open('/content/runs/load.py').read(),globals())
 from bonsai_tpu.engine import Engine
 import os
-NCTX=int(os.environ.get('BONSAI_NCTX','8192'));KV=os.environ.get('BONSAI_KV','float32')
+NCTX=int(os.environ.get('BONSAI_NCTX','8192'));KV=os.environ.get('BONSAI_KV','bfloat16')
 LENS=[int(x) for x in os.environ.get('BONSAI_LENS','512,2048,8192').split(',')]
 E=Engine(None,n_ctx=NCTX,kv_dtype=KV,preloaded=(G,CFG,PARAMS),block=16)
 rng=np.random.default_rng(0)

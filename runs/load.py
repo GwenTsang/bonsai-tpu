@@ -16,4 +16,6 @@ import gc
 for _n in [n for n in list(globals()) if n not in ('PARAMS','CFG','G','LOAD_S','RELOAD','M','GGUF') and not n.startswith('_') and type(globals()[n]).__name__ not in ('module','function','type','builtin_function_or_method')]:
     del globals()[_n]
 gc.collect()
+jax.clear_caches()   # each cached TPU executable pins ~1.1 GiB of host RAM
+import ctypes;ctypes.CDLL('libc.so.6').malloc_trim(0)
 print('HBM',{k:round(v/2**30,3) for k,v in jax.devices()[0].memory_stats().items() if 'bytes' in k},flush=True)

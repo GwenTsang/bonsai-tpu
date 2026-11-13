@@ -6,8 +6,8 @@ N_CTX=1024
 def cmp(l,r):
     l=np.asarray(l);p=np.exp(r-r.max());p/=p.sum();lq=l-l.max();lq=lq-np.log(np.exp(lq).sum())
     return dict(argmax=int(l.argmax()),ref_argmax=int(r.argmax()),rel_l2=float(np.linalg.norm(l-r)/np.linalg.norm(r)),kl=float(np.sum(p*(np.log(p+1e-30)-lq))))
-step=jax.jit(functools.partial(M.decode_step,CFG,act_len=N_CTX),donate_argnums=(1,))
-pre=jax.jit(functools.partial(M.prefill_chunk,CFG,act_len=N_CTX),donate_argnums=(1,))
+step=jax.jit(functools.partial(M.decode_step,CFG),donate_argnums=(1,))
+pre=jax.jit(functools.partial(M.prefill_chunk,CFG),donate_argnums=(1,))
 out={}
 # A: prefill 5-token prompt in one batch, then decode greedily and compare to CPU reference at each step
 state=M.init_state(CFG,N_CTX,slack=256)

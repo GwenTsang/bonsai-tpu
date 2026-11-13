@@ -1,0 +1,35 @@
+[
+ {
+  "turn": 0,
+  "finish": "tool_calls",
+  "prompt": 373,
+  "cached": 0,
+  "fed": 373,
+  "prefill_ms": 42659.6,
+  "gen": 26,
+  "tok_s": 0.8,
+  "wall": 77.168
+ },
+ {
+  "turn": 1,
+  "finish": "tool_calls",
+  "prompt": 2831,
+  "cached": 399,
+  "fed": 2432,
+  "prefill_ms": 44048.1,
+  "gen": 31,
+  "tok_s": 0.9,
+  "wall": 78.639
+ },
+ {
+  "turn": 2,
+  "finish": "stop",
+  "prompt": 2883,
+  "cached": 2862,
+  "fed": 21,
+  "prefill_ms": 33219.4,
+  "gen": 22,
+  "tok_s": 72.7,
+  "wall": 33.53
+ }
+]

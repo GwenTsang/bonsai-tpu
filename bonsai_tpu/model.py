@@ -97,7 +97,7 @@ def load_params(gguf, log=print):
 
 def init_state(cfg, n_ctx, kv_dtype=jnp.float32, slack=0):
     """slack: extra KV rows so a padded prefill chunk may write past the last valid position."""
-    n_ctx = n_ctx + slack
+    n_ctx = -(-(n_ctx + slack) // ATT_BLOCK) * ATT_BLOCK
     n_rec = sum(cfg.is_recurrent(i) for i in range(cfg.n_layer))
     n_full = cfg.n_layer - n_rec
     c = cfg.gdn_inner + 2 * cfg.gdn_k_heads * cfg.gdn_dk
@@ -176,7 +176,47 @@ def recurrent_mixer(cfg, L, signs, h, conv_state, gdn_state):
     return y, window[1:], s
 
 
-def attention_mixer(cfg, L, signs, h, k_cache, v_cache, pos, act_len):
+ATT_BLOCK = 4096      # keys per streaming-attention block; KV caches are allocated in multiples of it
+
+
+def attend(q, qpos, k_cache, v_cache, scale):
+    """Causal attention of q[G, R, hd] (row r sees cache positions <= qpos[r]) over k/v caches [G, S, hd].
+
+    Streams over the cache in ATT_BLOCK-key blocks with an online softmax inside a while_loop whose trip
+    count follows the *used* length, so one compiled program serves every context length, work scales with
+    the tokens actually present, and temporaries are bounded by the block size instead of the context.
+    """
+    g, r, hd = q.shape
+    f32 = k_cache.dtype == jnp.float32
+    qc = q if f32 else q.astype(k_cache.dtype)
+    nblk = jnp.max(qpos) // ATT_BLOCK + 1
+
+    def body(c):
+        b, mx, den, acc = c
+        ks = jax.lax.dynamic_slice(k_cache, (0, b * ATT_BLOCK, 0), (g, ATT_BLOCK, hd))
+        vs = jax.lax.dynamic_slice(v_cache, (0, b * ATT_BLOCK, 0), (g, ATT_BLOCK, hd))
+        if f32:
+            sc = jnp.einsum('grd,gsd->grs', qc, ks, precision=HI)
+        else:
+            sc = jnp.einsum('grd,gsd->grs', qc, ks, preferred_element_type=jnp.float32)
+        idx = b * ATT_BLOCK + jnp.arange(ATT_BLOCK)
+        sc = jnp.where(idx[None, None, :] <= qpos[None, :, None], sc * scale, -jnp.inf)
+        mn = jnp.maximum(mx, jnp.max(sc, axis=-1))
+        p = jnp.exp(sc - mn[..., None])
+        carry = jnp.exp(mx - mn)
+        if f32:
+            pv = jnp.einsum('grs,gsd->grd', p, vs, precision=HI)
+        else:
+            pv = jnp.einsum('grs,gsd->grd', p.astype(vs.dtype), vs, preferred_element_type=jnp.float32)
+        return b + 1, mn, den * carry + jnp.sum(p, axis=-1), acc * carry[..., None] + pv
+
+    init = (jnp.int32(0), jnp.full((g, r), -jnp.inf, jnp.float32), jnp.zeros((g, r), jnp.float32),
+            jnp.zeros((g, r, hd), jnp.float32))
+    _, _, den, acc = jax.lax.while_loop(lambda c: c[0] < nblk, body, init)
+    return acc / den[..., None]
+
+
+def attention_mixer(cfg, L, signs, h, k_cache, v_cache, pos):
     nh, nkv, hd = cfg.n_head, cfg.n_head_kv, cfg.head_dim
     qkv = kernels.gemv(rotate(h, signs[cfg.n_embd]), L['qkv'])
     qg = qkv[:nh * hd * 2].reshape(nh, 2 * hd)
@@ -186,26 +226,15 @@ def attention_mixer(cfg, L, signs, h, k_cache, v_cache, pos, act_len):
     v = qkv[nh * hd * 2 + nkv * hd:].reshape(nkv, hd)
     k_cache = jax.lax.dynamic_update_slice(k_cache, k[:, None, :].astype(k_cache.dtype), (0, pos, 0))
     v_cache = jax.lax.dynamic_update_slice(v_cache, v[:, None, :].astype(v_cache.dtype), (0, pos, 0))
-    keys, values = k_cache[:, :act_len], v_cache[:, :act_len]
-    qh = q.reshape(nkv, nh // nkv, hd)
-    if keys.dtype == jnp.float32:
-        scores = jnp.einsum('gjd,gsd->gjs', qh, keys, precision=HI)
-    else:
-        scores = jnp.einsum('gjd,gsd->gjs', qh.astype(keys.dtype), keys, preferred_element_type=jnp.float32)
-    scores = scores * (hd ** -0.5)
-    mask = jnp.arange(act_len) <= pos
-    probs = jax.nn.softmax(jnp.where(mask[None, None, :], scores, -jnp.inf), axis=-1)
-    if values.dtype == jnp.float32:
-        out = jnp.einsum('gjs,gsd->gjd', probs, values, precision=HI)
-    else:
-        out = jnp.einsum('gjs,gsd->gjd', probs.astype(values.dtype), values, preferred_element_type=jnp.float32)
+    per = nh // nkv
+    out = attend(q.reshape(nkv, per, hd), jnp.full((per,), pos), k_cache, v_cache, hd ** -0.5)
     out = out.reshape(-1) * jax.nn.sigmoid(gate)
     y = kernels.gemv(rotate(out, signs[nh * hd]), L['out'])
     return y, k_cache, v_cache
 
 
-def decode_step(cfg, params, state, token, act_len, trace=None):
-    """One autoregressive step: token id -> logits [vocab], updated state.  act_len: static cache bound."""
+def decode_step(cfg, params, state, token, trace=None):
+    """One autoregressive step: token id -> logits [vocab], updated state."""
     signs = params['signs']
     x = embed(params, token)
     pos = state['pos']
@@ -219,7 +248,7 @@ def decode_step(cfg, params, state, token, act_len, trace=None):
             new['gdn'].append(gs)
             ir += 1
         else:
-            y, kc, vc = attention_mixer(cfg, L, signs, h, state['k'][ia], state['v'][ia], pos, act_len)
+            y, kc, vc = attention_mixer(cfg, L, signs, h, state['k'][ia], state['v'][ia], pos)
             new['k'].append(kc)
             new['v'].append(vc)
             ia += 1
@@ -335,7 +364,7 @@ def recurrent_mixer_many(cfg, L, signs, h, conv_state, gdn_state, n_valid):
     return y, new_conv, gdn_state
 
 
-def attention_mixer_many(cfg, L, signs, h, k_cache, v_cache, pos, act_len):
+def attention_mixer_many(cfg, L, signs, h, k_cache, v_cache, pos):
     m = h.shape[0]
     nh, nkv, hd = cfg.n_head, cfg.n_head_kv, cfg.head_dim
     positions = pos + jnp.arange(m)
@@ -348,36 +377,19 @@ def attention_mixer_many(cfg, L, signs, h, k_cache, v_cache, pos, act_len):
     v = qkv[:, nh * hd * 2 + nkv * hd:].reshape(m, nkv, hd)
     k_cache = jax.lax.dynamic_update_slice(k_cache, k.transpose(1, 0, 2).astype(k_cache.dtype), (0, pos, 0))
     v_cache = jax.lax.dynamic_update_slice(v_cache, v.transpose(1, 0, 2).astype(v_cache.dtype), (0, pos, 0))
-    mask = jnp.arange(act_len)[None, :] <= positions[:, None]                     # [M, L]
     per = nh // nkv
-    qh = q.reshape(m, nkv, per, hd)
-    outs = []
-    for g in range(nkv):
-        keys, values = k_cache[g, :act_len], v_cache[g, :act_len]
-        qgk = qh[:, g].reshape(m * per, hd)
-        if keys.dtype == jnp.float32:
-            sc = jnp.matmul(qgk, keys.T, precision=HI)
-        else:
-            sc = jax.lax.dot_general(qgk.astype(keys.dtype), keys, (((1,), (1,)), ((), ())),
-                                     preferred_element_type=jnp.float32)
-        sc = sc.reshape(m, per, act_len) * (hd ** -0.5)
-        pr = jax.nn.softmax(jnp.where(mask[:, None, :], sc, -jnp.inf), axis=-1).reshape(m * per, act_len)
-        if values.dtype == jnp.float32:
-            o = jnp.matmul(pr, values, precision=HI)
-        else:
-            o = jax.lax.dot_general(pr.astype(values.dtype), values, (((1,), (0,)), ((), ())),
-                                    preferred_element_type=jnp.float32)
-        outs.append(o.reshape(m, per, hd))
-    out = jnp.concatenate(outs, axis=1).reshape(m, -1) * jax.nn.sigmoid(gate)
+    qh = q.reshape(m, nkv, per, hd).transpose(1, 0, 2, 3).reshape(nkv, m * per, hd)       # rows (token, head)
+    out = attend(qh, jnp.repeat(positions, per), k_cache, v_cache, hd ** -0.5)
+    out = out.reshape(nkv, m, per, hd).transpose(1, 0, 2, 3).reshape(m, -1) * jax.nn.sigmoid(gate)
     y = kernels.gemm(rotate(out, signs[nh * hd]), L['out'])
     return y, k_cache, v_cache
 
 
-def prefill_chunk(cfg, params, state, tokens, n_valid, act_len, want_logits=True):
+def prefill_chunk(cfg, params, state, tokens, n_valid):
     """Process the first n_valid of tokens[M] in one batched pass (the rest is padding, so one compiled
     program serves every length <= M).  Padding never alters recurrent state; its KV rows land beyond the
     valid range and are overwritten by later tokens (caches carry M rows of slack).
-    Returns logits for the last valid token (or None) and the new state."""
+    Returns logits for the last valid token and the new state."""
     signs = params['signs']
     x = embed_many(params, tokens)
     pos = state['pos']
@@ -391,13 +403,11 @@ def prefill_chunk(cfg, params, state, tokens, n_valid, act_len, want_logits=True
             new['gdn'].append(gs)
             ir += 1
         else:
-            y, kc, vc = attention_mixer_many(cfg, L, signs, h, state['k'][ia], state['v'][ia], pos, act_len)
+            y, kc, vc = attention_mixer_many(cfg, L, signs, h, state['k'][ia], state['v'][ia], pos)
             new['k'].append(kc)
             new['v'].append(vc)
             ia += 1
         x = x + y
         x = x + ffn_many(cfg, L, signs, rms_norm(x, L['post_norm']))
-    if not want_logits:
-        return None, new
     h = rms_norm(x[n_valid - 1], params['out_norm'])
     return kernels.gemv(rotate(h, signs[cfg.n_embd]), params['head']), new
