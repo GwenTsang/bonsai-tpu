@@ -69,7 +69,10 @@ def decode_block(cfg, n_max, params, state, token, key, n, temperature, top_k, t
 class Engine:
     def __init__(self, gguf_path, n_ctx=8192, kv_dtype='bfloat16', log=print, preloaded=None, block=16, max_programs=12,
                  max_snapshots=6, snapshot_every=4096, compile_cache='~/.cache/bonsai_tpu/xla',
-                 speculate=True):
+                 speculate=True, park_min=1024, park_bytes=24 << 30):
+        self.park_min = int(park_min)        # shortest conversation worth parking in host RAM
+        self.park_bytes = int(park_bytes)    # host RAM budget for parked conversations
+        self.parked = []
         self.speculate = bool(speculate)
         self.spec_stats = {'rounds': 0, 'drafted': 0, 'accepted': 0, 'misses': 0}
         self.block = int(block)
@@ -230,6 +233,76 @@ class Engine:
         self.pending_logits = logits
         return logits
 
+    # -- conversation parking (host RAM) ----------------------------------------------------------
+    # Agent harnesses interleave conversations (side requests for titles or summaries, sub-agents, several
+    # sessions).  Before a request destroys a long conversation's state, its used KV rows, recurrent state and
+    # latest checkpoints are copied to host RAM; when that conversation returns it is uploaded again
+    # (host->device runs at ~14 GB/s) instead of being re-processed from the first token.
+    @staticmethod
+    def _resume_point(prompt, history, snap_positions):
+        lcp = 0
+        for a_, b_ in zip(prompt, history):
+            if a_ != b_:
+                break
+            lcp += 1
+        if lcp == len(history) and len(prompt) > len(history):
+            return lcp
+        lim = min(lcp, len(prompt) - 1)
+        return max([p_ for p_ in snap_positions if p_ <= lim], default=0)
+
+    def _park(self):
+        n = len(self.history)
+        if n < self.park_min or self.park_bytes <= 0:
+            return
+        t = time.perf_counter()
+        rows = -(-n // M.ATT_BLOCK) * M.ATT_BLOCK
+        sess = {'history': list(self.history), 'used': time.time(),
+                'kv': [(np.asarray(k[:, :rows]), np.asarray(v[:, :rows]))
+                       for k, v in zip(self.state['k'], self.state['v'])],
+                'conv': [np.asarray(c) for c in self.state['conv']],
+                'gdn': [np.asarray(g) for g in self.state['gdn']],
+                'snaps': [{'pos': sn['pos'], 'conv': [np.asarray(c) for c in sn['conv']],
+                           'gdn': [np.asarray(g) for g in sn['gdn']]} for sn in self.snapshots[-3:]]}
+        sess['bytes'] = (sum(a_.nbytes + b_.nbytes for a_, b_ in sess['kv'])
+                         + (1 + len(sess['snaps'])) * sum(a_.nbytes for a_ in sess['conv'] + sess['gdn']))
+        # a parked conversation that is a prefix of this one is superseded
+        self.parked = [p_ for p_ in self.parked if p_['history'] != sess['history'][:len(p_['history'])]]
+        self.parked.append(sess)
+        while sum(p_['bytes'] for p_ in self.parked) > self.park_bytes and len(self.parked) > 1:
+            self.parked.remove(min(self.parked, key=lambda p_: p_['used']))
+        self.stats_park = {'parked_tokens': n, 'park_s': time.perf_counter() - t}
+
+    def _unpark(self, sess):
+        t = time.perf_counter()
+        self.parked.remove(sess)
+        k = [_write_rows(c, jnp.asarray(r[0])) for c, r in zip(self.state['k'], sess['kv'])]
+        v = [_write_rows(c, jnp.asarray(r[1])) for c, r in zip(self.state['v'], sess['kv'])]
+        self.state = {'pos': jnp.int32(len(sess['history'])), 'k': k, 'v': v,
+                      'conv': [jnp.asarray(c) for c in sess['conv']], 'gdn': [jnp.asarray(g) for g in sess['gdn']]}
+        self.history = list(sess['history'])
+        self.snapshots = [{'pos': sn['pos'], 'conv': [jnp.asarray(c) for c in sn['conv']],
+                           'gdn': [jnp.asarray(g) for g in sn['gdn']]} for sn in sess['snaps']]
+        self.pending_logits = None
+        self._ngram, self._ngram_upto = {}, 0
+        self.stats_park = {'restored_tokens': len(self.history), 'restore_s': time.perf_counter() - t}
+
+    def _select_conversation(self, prompt_ids):
+        """Make the live state the best starting point for this prompt, parking what would be lost."""
+        self.stats_park = {}
+        cur = self._resume_point(prompt_ids, self.history, [sn['pos'] for sn in self.snapshots])
+        best, best_r = None, cur
+        for sess in self.parked:
+            r = self._resume_point(prompt_ids, sess['history'], [sn['pos'] for sn in sess['snaps']])
+            if r > best_r:
+                best, best_r = sess, r
+        lost = len(self.history) - (cur if best is None else 0)
+        if lost >= self.park_min and 2 * lost >= len(self.history):
+            self._park()                                  # this request would discard most of a long conversation
+        if best is not None:
+            park = self.stats_park
+            self._unpark(best)
+            self.stats_park.update(park)
+
     # -- prompt-lookup speculation ----------------------------------------------------------------
     # Agent output copies long spans of its context (file edits, quoted tool output).  When the last
     # SPEC_NGRAM tokens reoccur earlier in the context, the tokens that followed are proposed as a draft and
@@ -263,6 +336,8 @@ class Engine:
             raise ValueError('empty prompt')
         if len(prompt_ids) >= self.n_ctx:
             raise ValueError('prompt has %d tokens; n_ctx is %d' % (len(prompt_ids), self.n_ctx))
+        if reuse_prefix:
+            self._select_conversation(prompt_ids)
         lcp = 0
         if reuse_prefix:
             for a_, b_ in zip(prompt_ids, self.history):
@@ -282,7 +357,7 @@ class Engine:
         key, sub = jax.random.split(key)
         token = int(_sample_jit(logits, sub, *args))
         t1 = time.perf_counter()
-        self.stats = {'prompt_tokens': len(prompt_ids) - n, 'reused_tokens': n, 'prefill_s': t1 - t0,
+        self.stats = {**getattr(self, 'stats_park', {}), 'prompt_tokens': len(prompt_ids) - n, 'reused_tokens': n, 'prefill_s': t1 - t0,
                       'completion_tokens': 0, 'decode_s': 0.0}
         produced = 0
         blocks_done = 0
@@ -373,4 +448,5 @@ class Engine:
 
 
 _sample_jit = jax.jit(sample_token)
+_write_rows = jax.jit(lambda cache, rows: jax.lax.dynamic_update_slice(cache, rows, (0, 0, 0)), donate_argnums=(0,))
 _copy_tree = jax.jit(lambda t: jax.tree.map(lambda x: x + jnp.zeros((), x.dtype), t))
