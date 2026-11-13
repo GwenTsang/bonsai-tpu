@@ -7,7 +7,7 @@ import time
 def main(argv=None):
     p = argparse.ArgumentParser(prog='bonsai_tpu')
     p.add_argument('mode', choices=['generate', 'chat', 'serve', 'bench'])
-    p.add_argument('--model', required=True, help='path to Ternary-Bonsai-2-27B-PTQ1_0.gguf')
+    p.add_argument('--model', default=None, help='GGUF path (default: download prism-ml/Ternary-Bonsai-2-27B-gguf)')
     p.add_argument('--ctx', type=int, default=8192, help='context length in tokens')
     p.add_argument('--kv', default='bfloat16', choices=['float32', 'bfloat16'], help='KV cache element type')
     p.add_argument('--prompt', default=None)
@@ -17,7 +17,8 @@ def main(argv=None):
     p.add_argument('--top-k', type=int, default=None)
     p.add_argument('--top-p', type=float, default=None)
     p.add_argument('--seed', type=int, default=0)
-    p.add_argument('--think', action='store_true', help='enable the model reasoning block in chat')
+    p.add_argument('--thinking', default='default', choices=['default', 'off', 'low', 'medium', 'xhigh'],
+                   help="the model's thinking parameter (default: model default = on, effort xhigh)")
     p.add_argument('--block', type=int, default=8, help='tokens generated per device round trip')
     p.add_argument('--host', default='127.0.0.1')
     p.add_argument('--port', type=int, default=8000)
@@ -41,6 +42,8 @@ def main(argv=None):
                 s['prompt_tokens'], s['reused_tokens'], s['prefill_s'], s['completion_tokens'],
                 s['completion_tokens'] / s['decode_s']), file=sys.stderr, flush=True)
 
+    think = None if a.thinking == 'default' else a.thinking != 'off'
+    effort = a.thinking if a.thinking in ('low', 'medium', 'xhigh') else None
     if a.mode == 'generate':
         for piece in eng.generate(a.prompt or sys.stdin.read(), **samp):
             print(piece, end='', flush=True)
@@ -60,15 +63,15 @@ def main(argv=None):
                 continue
             messages.append({'role': 'user', 'content': user})
             reply = ''
-            for piece in eng.chat(messages, enable_thinking=a.think, **samp):
+            for piece in eng.chat(messages, thinking=think, reasoning_effort=effort, **samp):
                 reply += piece
                 print(piece, end='', flush=True)
-            content = reply.split('</think>')[-1].strip() if a.think else reply.strip()
+            content = reply.split('</think>')[-1].strip() if think is not False else reply.strip()
             messages.append({'role': 'assistant', 'content': content})
             report()
     elif a.mode == 'serve':
         from .server import serve
-        httpd = serve(eng, a.host, a.port)
+        httpd = serve(eng, a.host, a.port, default_thinking=think is not False)
         print('serving OpenAI-compatible API on http://%s:%d/v1' % (a.host, a.port), file=sys.stderr, flush=True)
         httpd.serve_forever()
     else:

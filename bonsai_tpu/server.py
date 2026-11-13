@@ -7,13 +7,42 @@ import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+from .defaults import MODEL_NAME
 from .tokenizer import StreamDecoder
 
 
 TOOL_OPEN = '<tool_call>'
 _TOOL_RE = re.compile(r'<tool_call>\s*<function=([^>\n]+)>(.*?)</function>\s*</tool_call>', re.S)
 _PARAM_RE = re.compile(r'<parameter=([^>\n]+)>\n?(.*?)\n?</parameter>', re.S)
-EFFORT = {'low': 'low', 'minimal': 'low', 'medium': 'medium', 'high': 'xhigh', 'xhigh': 'xhigh'}
+EFFORT = {'minimal': 'low', 'low': 'low', 'medium': 'medium', 'high': 'xhigh', 'xhigh': 'xhigh', 'max': 'xhigh'}
+
+
+def thinking_options(body, default):
+    """Resolve the model's `thinking` switch and reasoning effort from the request.
+
+    Accepted spellings (first match wins): `thinking` (bool, "on"/"off", or {"type": "enabled"|"disabled"}),
+    `enable_thinking`, `chat_template_kwargs.{enable_thinking, thinking, reasoning_effort}`,
+    `reasoning_effort` / `reasoning.effort` ("none"/"off" disables; minimal..max map onto the template's
+    low / medium / xhigh).  Returns (enabled: bool, effort or None)."""
+    ctk = body.get('chat_template_kwargs') or {}
+    effort = body.get('reasoning_effort') or (body.get('reasoning') or {}).get('effort') or ctk.get('reasoning_effort')
+    enabled = None
+    for v in (body.get('thinking'), body.get('enable_thinking'), ctk.get('enable_thinking'), ctk.get('thinking')):
+        if v is None:
+            continue
+        if isinstance(v, dict):
+            v = v.get('type', 'enabled')
+        if isinstance(v, str):
+            if v.lower() in EFFORT and not effort:
+                effort = v.lower()
+            v = v.lower() not in ('disabled', 'off', 'false', 'none', '0')
+        enabled = bool(v)
+        break
+    if isinstance(effort, str) and effort.lower() in ('none', 'off', 'disabled'):
+        enabled, effort = (False if enabled is None else enabled), None
+    if enabled is None:
+        enabled = True if effort else default
+    return enabled, (EFFORT.get(str(effort).lower()) if effort and enabled else None)
 
 
 def _sampling(body, default_max):
@@ -138,7 +167,7 @@ class OutputSplitter:
         return reasoning.strip(), content, tool
 
 
-def make_handler(engine, model_name, default_thinking=False, default_max_tokens=4096):
+def make_handler(engine, model_name, default_thinking=True, default_max_tokens=4096):
     lock = threading.Lock()
     totals = {'requests': 0, 'prompt_tokens': 0, 'reused_tokens': 0, 'completion_tokens': 0, 'prefill_s': 0.0,
               'decode_s': 0.0}
@@ -194,10 +223,13 @@ def make_handler(engine, model_name, default_thinking=False, default_max_tokens=
             try:
                 if chat:
                     kw = {'tools': tools} if tools else {}
-                    effort = body.get('reasoning_effort')
-                    thinking = body.get('enable_thinking', default_thinking if effort is None else effort != 'none')
-                    if thinking and effort in EFFORT:
-                        kw['reasoning_effort'] = EFFORT[effort]
+                    thinking, effort = thinking_options(body, default_thinking)
+                    totals['last_thinking'] = {'enabled': thinking, 'effort': effort}
+                    if effort:
+                        kw['reasoning_effort'] = effort
+                    for k_ in ('preserve_thinking',):
+                        if k_ in (body.get('chat_template_kwargs') or {}):
+                            kw[k_] = body['chat_template_kwargs'][k_]
                     prompt = engine.tokenizer.apply_chat_template(
                         normalize_messages(body['messages']), add_generation_prompt=True,
                         enable_thinking=bool(thinking), **kw)
@@ -304,7 +336,7 @@ def make_handler(engine, model_name, default_thinking=False, default_max_tokens=
     return Handler
 
 
-def serve(engine, host='127.0.0.1', port=8000, model_name='ternary-bonsai-2-27b', **kw):
+def serve(engine, host='127.0.0.1', port=8000, model_name=MODEL_NAME, **kw):
     httpd = ThreadingHTTPServer((host, port), make_handler(engine, model_name, **kw))
     httpd.daemon_threads = True
     return httpd

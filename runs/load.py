@@ -16,7 +16,8 @@ jax.clear_caches()                   # each cached TPU executable pins ~1.1 GiB 
 ctypes.CDLL('libc.so.6').malloc_trim(0)
 if 'PARAMS' not in globals():
     _t=time.perf_counter()
-    G=GGUF('/content/weights/Ternary-Bonsai-2-27B-PTQ1_0.gguf')
+    from bonsai_tpu.defaults import resolve_model
+    G=GGUF(resolve_model())
     CFG,PARAMS=M.load_params(G,log=None)
     jax.block_until_ready(PARAMS)
     LOAD_S=time.perf_counter()-_t

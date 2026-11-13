@@ -5,6 +5,7 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 from . import model as M
+from .defaults import resolve_model
 from .gguf import GGUF
 from .tokenizer import BonsaiTokenizer, StreamDecoder
 
@@ -67,7 +68,7 @@ def decode_block(cfg, n_max, params, state, token, key, n, temperature, top_k, t
 
 
 class Engine:
-    def __init__(self, gguf_path, n_ctx=8192, kv_dtype='bfloat16', log=print, preloaded=None, block=16, max_programs=12,
+    def __init__(self, gguf_path=None, n_ctx=8192, kv_dtype='bfloat16', log=print, preloaded=None, block=16, max_programs=12,
                  max_snapshots=6, snapshot_every=4096, compile_cache='~/.cache/bonsai_tpu/xla',
                  speculate=True, park_min=1024, park_bytes=24 << 30):
         self.park_min = int(park_min)        # shortest conversation worth parking in host RAM
@@ -89,7 +90,7 @@ class Engine:
         if preloaded is not None:      # (gguf, cfg, params) already resident, e.g. in a notebook kernel
             self.gguf, self.cfg, self.params = preloaded
         else:
-            self.gguf = GGUF(gguf_path)
+            self.gguf = GGUF(resolve_model(gguf_path, self.log))
             self.cfg, self.params = M.load_params(self.gguf, log=None)
         self.tokenizer = BonsaiTokenizer(self.gguf.metadata)
         jax.block_until_ready(self.params)
@@ -435,11 +436,19 @@ class Engine:
             if piece:
                 yield piece
 
-    def chat(self, messages, enable_thinking=False, tools=None, **kw):
-        """Yield text pieces for an OpenAI-style message list using the model's own chat template."""
+    def chat(self, messages, thinking=None, reasoning_effort=None, tools=None, enable_thinking=None, **kw):
+        """Yield text pieces for an OpenAI-style message list using the model's own chat template.
+
+        thinking: None = the model's default (reasoning on), False = off, True = on;
+        reasoning_effort: 'low' | 'medium' | 'xhigh' (template default xhigh)."""
+        if thinking is None:
+            thinking = enable_thinking
         tk = {} if tools is None else {'tools': tools}
-        prompt = self.tokenizer.apply_chat_template(messages, add_generation_prompt=True,
-                                                    enable_thinking=enable_thinking, **tk)
+        if thinking is not None:
+            tk['enable_thinking'] = bool(thinking)
+        if reasoning_effort and thinking is not False:
+            tk['reasoning_effort'] = reasoning_effort
+        prompt = self.tokenizer.apply_chat_template(messages, add_generation_prompt=True, **tk)
         yield from self.generate(prompt, **kw)
 
     def memory_report(self):

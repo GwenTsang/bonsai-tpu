@@ -1,7 +1,12 @@
 # Bonsai TPU — Ternary Bonsai 2 27B on one TPU v5e
 
-A standalone JAX/Pallas inference engine for `prism-ml/Ternary-Bonsai-2-27B-gguf` (PTQ1_0 release, qwen35
-hybrid Gated-DeltaNet / attention architecture, 26.9 B ternary weights) on a single Google TPU v5e-1 (16 GB HBM).
+A standalone JAX/Pallas inference engine for
+[`prism-ml/Ternary-Bonsai-2-27B-gguf`](https://huggingface.co/prism-ml/Ternary-Bonsai-2-27B-gguf) — the ternary
+quantisation of **Qwen 3.8 27B** — on a single Google TPU v5e-1 (16 GB HBM). That repository (PTQ1_0 file,
+pinned revision `839bd57`) is the built-in default: with no `--model` the engine downloads it.
+
+The GGUF labels its graph `general.architecture = qwen35`; that is the llama.cpp architecture name of this
+hybrid Gated-DeltaNet / attention family (26.9 B ternary weights), not a different model.
 
 The whole model stays resident in HBM in a 2-bit layout (7.2 GiB) and is evaluated by custom Pallas kernels.
 It is built for agent loops: conversation state is reused across requests, tool calls are parsed, and copied
@@ -12,13 +17,14 @@ Measured on Colab TPU v5e-1 (details, raw data and method: [research/REPORT.md](
 
 | | |
 |---|---|
-| Decode, short context | 70-78 tok/s (CPU reference on the dev host: 4 tok/s) |
+| Decode, short context | 77.6 tok/s (CPU reference on the dev host: 4 tok/s) |
 | Decode at 32K / 64K context | 59 / 50 tok/s |
 | Decode while copying context (file edits) | up to 571 tok/s, identical tokens |
-| Prefill | 1700-1850 tok/s (1183 tok/s averaged over a 64K prompt) |
-| Context tested | 65,536 tokens (BF16 KV), HBM in use 11.4-12.4 GiB |
+| Prefill | 2110-2170 tok/s up to 8K prompts, 1800 at 32K, 1280 averaged over a 98K prompt |
+| Context tested | 98,304 tokens (BF16 KV, 14.0 GiB HBM); 65,536 is the serving default (12 GiB) |
 | Load / warm start | 13 s load; programs load from the XLA cache in ~20 s (2-3 min first time) |
-| Agreement with the Prism llama.cpp CPU reference | same greedy tokens; KL ~1e-5 per step |
+| Agreement with the Prism llama.cpp CPU reference | top-1 319/320 teacher-forced steps over 10 prompt types; mean KL 1.3e-5 |
+| Interleaved conversations | 19K-token session parked to host RAM in ~1 s, restored in 0.3-0.6 s |
 
 ## Layout
 
@@ -66,16 +72,16 @@ available everywhere.
 ### On the runtime itself
 
 ```sh
-python -m bonsai_tpu.cli chat  --model /content/weights/Ternary-Bonsai-2-27B-PTQ1_0.gguf --ctx 32768
-python -m bonsai_tpu.cli serve --model ... --ctx 65536 --port 8000
-python -m bonsai_tpu.cli bench --model ...
+python -m bonsai_tpu.cli chat  --ctx 32768 --thinking off     # default model is downloaded if absent
+python -m bonsai_tpu.cli serve --ctx 65536 --port 8000
+python -m bonsai_tpu.cli bench --model /path/to/other.gguf     # any PTQ1_0 GGUF of this architecture
 ```
 
 ```python
 from bonsai_tpu.engine import Engine
-eng = Engine('/content/weights/Ternary-Bonsai-2-27B-PTQ1_0.gguf', n_ctx=32768)
+eng = Engine(n_ctx=32768)            # prism-ml/Ternary-Bonsai-2-27B-gguf by default
 eng.warmup()
-for piece in eng.chat([{'role': 'user', 'content': 'Hi'}], temperature=0.7, max_new_tokens=256):
+for piece in eng.chat([{'role': 'user', 'content': 'Hi'}], thinking=False, temperature=0.7, max_new_tokens=256):
     print(piece, end='')
 ```
 
@@ -87,7 +93,11 @@ Dependencies on the runtime: `jax`/`jaxlib` with TPU support (0.11.2 tested), `n
 `/v1/chat/completions`, `/v1/completions`, `/v1/models`, `/health`, `/metrics`.
 
 - `tools` are rendered by the model's chat template; `<tool_call>` blocks in the output become `tool_calls`.
-- `enable_thinking` (or `reasoning_effort`) turns the reasoning block on; it is returned as `reasoning_content`.
+- Thinking is the model's own switch and is on by default, as in its chat template. Per request:
+  `"thinking": false` (also `enable_thinking`, `chat_template_kwargs.enable_thinking`,
+  `{"thinking": {"type": "disabled"}}`), and `reasoning_effort` `low | medium | high` (mapped to the
+  template's low / medium / xhigh). Reasoning is returned as `reasoning_content`.
+  Server default: `BONSAI_THINK=0 scripts/start_server.sh` or `cli serve --thinking off`.
 - `usage.prompt_tokens_details.cached_tokens` and `timings` report how much of the prompt was served from state.
 - One request at a time (single-user engine).
 
@@ -99,6 +109,8 @@ Dependencies on the runtime: `jax`/`jaxlib` with TPU support (0.11.2 tested), `n
 - Per-message tokenization is cached.
 - When the last six generated tokens also occur earlier in the context, the continuation found there is
   verified 32 positions at a time.
+- A conversation about to be displaced by a different one is parked in host RAM (KV rows, recurrent state,
+  checkpoints) and uploaded again when it returns.
 
 ## Tests
 
@@ -127,5 +139,5 @@ Source, results and the research log are in this repository; nothing on the runt
 - Prompt processing uses BF16 activations and BF16-reconstructed weights; decode uses exact ternary weights
   with 16-bit activations. Both agree with the CPU reference to KL ~1e-5 per step, but they are not bitwise
   identical to each other or to the reference (which quantises activations to 8 bits itself).
-- 64K context is the largest tested. 128K with BF16 KV does not fit next to the weights; see the report.
+- 98K context is the largest tested. 128K with BF16 KV does not fit next to the weights; see the report.
 - Each compiled program pins ~1.1 GiB of host RAM; the engine uses four.

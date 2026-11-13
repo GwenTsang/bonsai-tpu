@@ -221,3 +221,23 @@ def test_segment_cached_chat_tokenization_is_exact(tokenizer):
         assert ids == tokenizer.encode(text)
     assert bounds[0] == 0 and len(bounds) == 5
     assert all(ids[b] == tokenizer.tokens.index('<|im_start|>') for b in bounds)
+
+
+def test_thinking_parameter_spellings():
+    from bonsai_tpu.server import thinking_options as t
+    assert t({}, True) == (True, None) and t({}, False) == (False, None)
+    assert t({'thinking': False}, True) == (False, None)
+    assert t({'thinking': {'type': 'disabled'}}, True) == (False, None)
+    assert t({'thinking': {'type': 'enabled'}}, False) == (True, None)
+    assert t({'enable_thinking': True, 'reasoning_effort': 'high'}, False) == (True, 'xhigh')
+    assert t({'reasoning_effort': 'low'}, False) == (True, 'low')
+    assert t({'reasoning_effort': 'none'}, True) == (False, None)
+    assert t({'chat_template_kwargs': {'enable_thinking': False}}, True) == (False, None)
+    assert t({'thinking': 'medium'}, False) == (True, 'medium')
+    assert t({'enable_thinking': False, 'reasoning_effort': 'high'}, True) == (False, None)
+
+
+def test_default_model_is_the_qwen38_based_release():
+    from bonsai_tpu import defaults
+    assert defaults.HF_REPO == 'prism-ml/Ternary-Bonsai-2-27B-gguf'
+    assert defaults.resolve_model('/some/path.gguf') == '/some/path.gguf'
