@@ -235,3 +235,33 @@ follows the used length. Block decode with BF16 KV: 13.1 ms at ~0 context, 13.4 
   total, 108K tokens served from state vs 20.9K fed, per-turn prefill 1.15-1.40 s, decode 62-69 tok/s,
   all 11 planted values retrieved correctly (agent-loop-client.json). Turn time is dominated by prefilling
   new tool output, so prefill throughput is the main lever for this workload.
+
+## 2026-11-13 — Speculation, parking, 98K context, int16 scales, default model, report (session 3, end)
+
+- User direction: agentic use; pi harness runs locally, Colab TPU is inference only; default model is the
+  Qwen 3.8-based `prism-ml/Ternary-Bonsai-2-27B-gguf` (this was the model all along; `qwen35` is the GGUF
+  architecture tag). `bonsai_tpu/defaults.py` pins repo/file/revision and auto-downloads.
+- Thinking parameter: the template's `enable_thinking` / `reasoning_effort`; server accepts `thinking`,
+  `enable_thinking`, `chat_template_kwargs`, `reasoning_effort`; default follows the template (on). Verified
+  through pi: off -> 3 tokens, low -> 31, high -> 67 for the same question.
+- Prompt-lookup speculative decoding (speculation.json): file rewrite 70.4 -> 571 tok/s, quoting explanation
+  70.4 -> 119.2, essay 70.5 -> 70.3; identical token streams in all three.
+- Conversation parking in host RAM (parking.json): 19K-token session, park 0.84-1.35 s (1.83 GiB), restore
+  0.33-0.57 s, same answer after restore.
+- Fused rotate kernel for prefill: 512-chunk 276 -> 239 ms. Ablation before it (prefill-opt.json): GDN 41 ms,
+  rotations 58 ms, attention 21 ms, rest (GEMM) 156 ms.
+- int16 half-coded scales decoded with integer ops inside the kernels: bit-identical logits, -0.37 GiB HBM,
+  40-matrix chain 1.857 -> 1.793 ms. Scale statistics: all positive, 2^-18.1 .. 2^-1.2, 492 f16 subnormals.
+- 96K context (bench-context-bfloat16-98304.json): 97,920-token prompt in 76.6 s, 42 tok/s decode after it,
+  14.0 GiB HBM in use with three checkpoints.
+- Headline (final-bench.json): decode 77.6 tok/s (5 trials), TTFT 49 ms, prefill 2154/2167/2110/1996/1800
+  tok/s at 512/2K/8K/16K/32K.
+- Reference evaluation (eval-reference.json): 319/320 top-1, mean KL 1.3e-5 for all three numeric paths.
+- pi 1.5.0 was already installed locally; the pi.dev installer was downloaded and read, not executed.
+  `PI_CODING_AGENT_DIR=pi-agent` keeps the user's own pi configuration untouched.
+- Correction: SGLang-JAX does contain a qwen3_5 model and GDN kernels (no ternary/Hadamard support); see the
+  report, section 4.
+- A mistake to avoid: `pkill -f` with a pattern that also matches the invoking shell killed the tool shell
+  twice.
+
+Recovery: `scripts/start_server.sh [n_ctx]` (attach-only; never provisions). See README "Recovery".
