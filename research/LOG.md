@@ -302,3 +302,38 @@ Recovery: `scripts/start_server.sh [n_ctx]` (attach-only; never provisions). See
   a fresh authenticated 5.9 GB download was not remeasured. Raw smoke evidence: results/setup-colab.json.
 - Current local pi profile points at port 8001 because the earlier development SSH tunnel occupies 8000.
   The new setup defaults to 8000 on a fresh machine. Existing unrelated defaults.py edits are not included.
+
+## 2026-11-13 — Default model: Huihui abliterated Qwen 3.8 27B (ternary PTQ1_0 file); K-quant matrices
+
+- User direction: the repository defaults to https://huggingface.co/huihui-ai/Huihui-Qwen3.8-27B-abliterated-GGUF
+  (revision 06b4baa at the time; not pinned, `BONSAI_REVISION` selects one). Of its ~50 files only the
+  `Ternary-Bonsai` builds are this architecture's ternary family; the default file is
+  `Huihui-Qwen3.8-27B-abliterated-Ternary-Bonsai-PTQ1_0.gguf` (6,608,603,616 bytes).
+- Header comparison with the Prism PTQ1_0 file: same 851 tensors, shapes, tokenizer, template and Hadamard
+  metadata; two extra `general.abliterated_*` keys; 31 `ffn_down.weight` (layers 22-52) are Q3_K (type 11)
+  and 23 `ssm_out.weight` (the recurrent layers among 22-52) are Q2_K (type 10) instead of PTQ1_0. The old
+  loader rejects these. (The `-PQ2_0` build is type 142 throughout plus the same K-quants; not supported.)
+- New resident layout P8 for those 54 matrices: K-quant weight = d * code with code = (scale6 - 32) * (q3 - 4)
+  for Q3_K and scale4 * q2 for Q2_K, range [-124, 128], stored as code + 124 in one byte, inputs in natural
+  order, one signed FP32 scale per 256 inputs (stored per 128). Q2_K minima become an FP32 [N, K/16] matrix
+  applied to sums of 16 inputs. Kernels: the GEMV/GEMM bodies gained a `p8` branch (two nibble planes via the
+  same shift/mask ops, two int8 MXU products for GEMV; BF16 reconstruction in four 256-row slices for GEMM);
+  `rotate_for_gemm(natural=True)` skips the B4 column permutation.
+- CPU evidence: `dequantize_row_q2_K` / `q3_K` bit-exact (every byte value at every payload position plus random
+  blocks); P8 dense round trip exact; kernels through the Pallas interpreter (`kernels.INTERPRET`) match dense
+  products (GEMV rel 3e-5, GEMM rel 2.3e-3, same as B4); 45 tests pass. Full graph on the real file, kernels
+  interpreted, against `reference/dump_logits` ('The capital of France is', reference greedy " Paris.\nThe"):
+  decode steps 0-2 KL 1.98e-5 / 1.70e-5 / 5.37e-5, rel-L2 0.0022-0.0027, top-1 equal; 8-row prefill chunk
+  KL 2.10e-5, rel-L2 0.0029, top-1 equal. About 100 s per token on the 16-core host.
+- Sizes (resident arrays, computed on CPU): parameters 9.362 GiB (B4 5.470, P8 3.517) against 6.708 GiB for
+  the Prism file; state at 65,536 context 4.396 GiB. Expected HBM at 65,536: about 12 + 2.65 = 14.7 GiB of
+  15.75. Expected decode cost of the extra 2.6 GB read per token at ~690 GB/s: ~3.8 ms (77 -> ~60 tok/s).
+- NOT DONE: nothing was run on a TPU (no Colab session was attached and sessions are never provisioned from
+  here). Open risks: Mosaic lowering of the P8 branches (1024-row uint8 weight blocks, `wv >> 4` planes, two
+  int8 products), HBM headroom at the 65,536 default, PREFILL_COSTS calibration (measured with the Prism
+  file), and all speed figures. A denser layout (4-bit Q3_K codes with per-sub-block multipliers, ~1 GiB
+  less) is possible but needs TPU measurements to design.
+- TPU validation data for this model: `eval/run_reference.sh` -> `results/ref-huihui/`; `runs/first_logits.py`
+  and `runs/prefill_check.py` now read token ids from `/content/reference-capital.json`.
+- Served model id is now `huihui-qwen3.8-27b-abliterated` (pi-agent/models.json, setup_colab, bench client).
+  Existing pi profiles keep their old `ternary-bonsai-2-27b` entry; setup adds the new one next to it.

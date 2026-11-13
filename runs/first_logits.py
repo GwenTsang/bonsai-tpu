@@ -1,7 +1,8 @@
 exec(open('/content/runs/load.py').read(),globals())
 import functools
 ref=np.fromfile('/content/reference-capital.f32','<f4').reshape(8,-1)
-prompt=[760,6511,314,9338,369];greedy=[11751,13,198,760,6511,314,9564,369]
+_meta=json.load(open('/content/reference-capital.json'))     # written by eval/run_reference.sh for the loaded model
+prompt=_meta['prompt_ids'];greedy=_meta['greedy_ids']
 N_CTX=64
 step=jax.jit(functools.partial(M.decode_step,CFG),donate_argnums=(1,))
 state=M.init_state(CFG,N_CTX)

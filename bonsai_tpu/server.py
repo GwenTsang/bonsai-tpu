@@ -7,7 +7,7 @@ import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from .defaults import MODEL_NAME
+from .defaults import MODEL_NAME, MODEL_OWNER
 from .tokenizer import StreamDecoder
 
 
@@ -196,7 +196,7 @@ def make_handler(engine, model_name, default_thinking=True, default_max_tokens=4
                 return self._json(200, {'status': 'ok'})
             if path in ('/v1/models', '/models'):
                 return self._json(200, {'object': 'list', 'data': [{
-                    'id': model_name, 'object': 'model', 'owned_by': 'prism-ml', 'created': 0,
+                    'id': model_name, 'object': 'model', 'owned_by': MODEL_OWNER, 'created': 0,
                     'context_length': engine.n_ctx}]})
             if path == '/metrics':
                 m = dict(totals, last=engine.stats, hbm=engine.memory(), n_ctx=engine.n_ctx,

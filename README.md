@@ -1,19 +1,25 @@
-# Bonsai TPU — Ternary Bonsai 2 27B on one TPU v5e
+# Bonsai TPU — ternary Qwen 3.8 27B on one TPU v5e
 
-A standalone JAX/Pallas inference engine for
-[`prism-ml/Ternary-Bonsai-2-27B-gguf`](https://huggingface.co/prism-ml/Ternary-Bonsai-2-27B-gguf) — the ternary
-quantisation of **Qwen 3.8 27B** — on a single Google TPU v5e-1 (16 GB HBM). That repository (PTQ1_0 file)
-is the built-in default: with no `--model` the engine downloads it.
+A standalone JAX/Pallas inference engine for the Ternary Bonsai 2 family — ternary quantisations of
+**Qwen 3.8 27B** — on a single Google TPU v5e-1 (16 GB HBM).
+
+**Default model:**
+[`huihui-ai/Huihui-Qwen3.8-27B-abliterated-GGUF`](https://huggingface.co/huihui-ai/Huihui-Qwen3.8-27B-abliterated-GGUF),
+file `Huihui-Qwen3.8-27B-abliterated-Ternary-Bonsai-PTQ1_0.gguf` (6.6 GB). With no `--model` the engine
+downloads it. See [Default model](#default-model) for why this file, and what has and has not been validated
+with it.
 
 The GGUF labels its graph `general.architecture = qwen35`; that is the llama.cpp architecture name of this
-hybrid Gated-DeltaNet / attention family (26.9 B ternary weights), not a different model.
+hybrid Gated-DeltaNet / attention family (26.9 B weights), not a different model.
 
-The whole model stays resident in HBM in a 2-bit layout (7.2 GiB) and is evaluated by custom Pallas kernels.
+The whole model stays resident in HBM (2-bit layout for ternary matrices, one byte per weight for the
+re-quantised abliterated ones; 9.4 GiB for the default file) and is evaluated by custom Pallas kernels.
 It is built for agent loops: conversation state is reused across requests, tool calls are parsed, and copied
 spans are verified in batches.
 
-Measured on Colab TPU v5e-1 (details, raw data and method: [research/REPORT.md](research/REPORT.md),
-[research/LOG.md](research/LOG.md), `results/*.json`):
+Measured on Colab TPU v5e-1 **with the original `prism-ml/Ternary-Bonsai-2-27B-gguf` PTQ1_0 file** (6.7 GiB
+resident); these numbers have not been re-measured with the Huihui default (details, raw data and method:
+[research/REPORT.md](research/REPORT.md), [research/LOG.md](research/LOG.md), `results/*.json`):
 
 | | |
 |---|---|
@@ -26,13 +32,45 @@ Measured on Colab TPU v5e-1 (details, raw data and method: [research/REPORT.md](
 | Agreement with the Prism llama.cpp CPU reference | top-1 319/320 teacher-forced steps over 10 prompt types; mean KL 1.3e-5 |
 | Interleaved conversations | 19K-token session parked to host RAM in ~1 s, restored in 0.3-0.6 s |
 
+## Default model
+
+The Huihui repository contains about fifty GGUF files. Only its `Ternary-Bonsai` builds belong to the family
+this engine implements (Prism ML's Hadamard-folded ternary weights); the others (Q2_K ... Q8_0, IQ2/IQ3,
+UD, GSQ-RCO, BF16) are conventional quantisations of 8.4-55 GB that neither match the kernels nor leave room
+for a context next to them in 16 GB. Of the ternary builds, `Ternary-Bonsai-PTQ1_0` is the same container as
+the original Prism release, so it is the default.
+
+It is not byte-compatible with the Prism file. Huihui abliterated layers 22-52 and stored the edited
+projections in stock llama.cpp K-quants: 31 `ffn_down` matrices as Q3_K and 23 `ssm_out` matrices as Q2_K
+(3.5 B of the 26.9 B weights). The loader folds their sub-block scales into integer codes and keeps them one
+byte per weight ("P8"); the GEMV/GEMM kernels read that layout with the same shift/mask and int8-MXU steps as
+the ternary one. Consequences:
+
+- Resident weights are 9.4 GiB instead of 6.7 GiB, so a 65,536-token context is expected to need about
+  14.7 GiB of the 15.75 GiB HBM instead of 12 GiB, and 98K no longer fits. Use `--ctx 32768` if the default
+  runs out of memory.
+- Decode reads 2.6 GB more per token; at the measured ~690 GB/s HBM rate that is roughly 4 ms on top of
+  12.9 ms (an estimate of ~60 instead of 77 tok/s).
+- **Validation status.** On CPU: the K-quant decode is bit-exact against ggml's C dequantizers; the kernels,
+  run through the Pallas interpreter, match dense products; and the full graph on the real file agrees with the
+  Prism llama.cpp reference on a short prompt (decode: same top token on 3/3 steps, KL 2e-5 to 5e-5;
+  batched prefill: same top token, KL 2.1e-5). **On the TPU: not run yet** — no runtime was attached when the default was changed. The
+  HBM and speed figures above are estimates, and the new kernel variants have not been compiled by Mosaic.
+  `scripts/run.sh runs/validate_all.py` and `runs/final_bench.py` are the first things to run.
+- The model is abliterated (refusal behaviour removed); see the usage warnings on its model card.
+
+Other models: `--model /path/to.gguf`, `$BONSAI_MODEL`, or `$BONSAI_HF_REPO` / `$BONSAI_HF_FILE` for another
+Hugging Face file of this family, for example the original
+`BONSAI_HF_REPO=prism-ml/Ternary-Bonsai-2-27B-gguf BONSAI_HF_FILE=Ternary-Bonsai-2-27B-PTQ1_0.gguf`.
+
 ## Layout
 
 ```
 bonsai_tpu/
   gguf.py          GGUF reader (metadata, tensor directory, mmap views)
-  quantization.py  exact PTQ1_0 / PQ2_0 codecs (validated against ggml's C dequantizers)
-  pack.py          on-device PTQ1_0 -> B4 (2-bit) conversion
+  defaults.py      default Hugging Face repository / file and download
+  quantization.py  exact PTQ1_0 / PQ2_0 / Q2_K / Q3_K codecs (validated against ggml's C dequantizers)
+  pack.py          on-device PTQ1_0 -> B4 (2-bit) and Q2_K / Q3_K -> P8 (8-bit) conversion
   kernels.py       Pallas kernels: int8 block-diagonal GEMV (decode), BF16 GEMM (prefill)
   hadamard.py      Prism Hadamard activation transforms (MXU formulations)
   model.py         qwen35 graph: decode step, batched prefill, chunk-parallel GDN, streaming attention
@@ -87,7 +125,7 @@ python3 -m bonsai_tpu.setup_colab --session bonsai-tpu --hf-token hf_YOUR_READ_T
 ```
 
 Setup itself **never provisions another runtime**. It checks the attached v5e-1, uploads source, installs
-missing runtime dependencies (including tested JAX/TPU 0.11.2), downloads the 5.9 GB GGUF directly onto
+missing runtime dependencies (including tested JAX/TPU 0.11.2), downloads the 6.6 GB GGUF directly onto
 Colab, loads the model, warms the programs, starts the local OpenAI-compatible bridge, and configures pi.
 The default context is 65,536 tokens. Use `--ctx 32768` for a smaller cache, or `--port 8001` if local port
 8000 is occupied. Select a download revision with `BONSAI_REVISION` on the runtime if needed.
@@ -117,9 +155,9 @@ Use the exact `Run:` line printed by setup. It uses an existing pi executable or
 private installation, so pi does not have to be on your PATH. If it is on PATH, the equivalent is:
 
 ```sh
-pi --provider bonsai-tpu --model ternary-bonsai-2-27b
+pi --provider bonsai-tpu --model huihui-qwen3.8-27b-abliterated
 # Short smoke test with reasoning/tools disabled:
-pi --provider bonsai-tpu --model ternary-bonsai-2-27b --thinking off --no-tools --no-session -p 'What is 2+2?'
+pi --provider bonsai-tpu --model huihui-qwen3.8-27b-abliterated --thinking off --no-tools --no-session -p 'What is 2+2?'
 ```
 
 For an isolated profile, prefix pi with `PI_CODING_AGENT_DIR=/path/to/test-profile`. Existing interactive
@@ -177,12 +215,12 @@ the runtime and stopping the local bridge are separate actions.
 ```sh
 python -m bonsai_tpu.cli chat  --ctx 32768 --thinking off     # default model is downloaded if absent
 python -m bonsai_tpu.cli serve --ctx 65536 --port 8000
-python -m bonsai_tpu.cli bench --model /path/to/other.gguf     # any PTQ1_0 GGUF of this architecture
+python -m bonsai_tpu.cli bench --model /path/to/other.gguf     # any PTQ1_0 (+ Q2_K/Q3_K) GGUF of this architecture
 ```
 
 ```python
 from bonsai_tpu.engine import Engine
-eng = Engine(n_ctx=32768)            # prism-ml/Ternary-Bonsai-2-27B-gguf by default
+eng = Engine(n_ctx=32768)            # huihui-ai/Huihui-Qwen3.8-27B-abliterated-GGUF (ternary PTQ1_0 file) by default
 eng.warmup()
 for piece in eng.chat([{'role': 'user', 'content': 'Hi'}], thinking=False, temperature=0.7, max_new_tokens=256):
     print(piece, end='')
@@ -226,6 +264,11 @@ scripts/run.sh runs/validate_all.py                                  # TPU: logi
 scripts/run.sh runs/eval_reference.py                                # TPU: representative prompt set
 ```
 
+The TPU checks compare with CPU-oracle logits of the model that is loaded. `eval/run_reference.sh` produces
+them for the default file in `results/ref-huihui/` and prints the three upload commands in its header
+(`reference-capital.f32`, `reference-capital.json`, `eval-ref.npz`). The files directly under `results/`
+(`reference-capital.*`, `eval-ref*`, `eval-reference.json`) belong to the original Prism file.
+
 The CPU oracle is the pinned PrismML llama.cpp fork (`scripts/build_reference.sh`, revision in the log).
 
 ## Recovery after a lost runtime
@@ -241,5 +284,6 @@ VM, so it is not the persistent interactive startup command.
 - Prompt processing uses BF16 activations and BF16-reconstructed weights; decode uses exact ternary weights
   with 16-bit activations. Both agree with the CPU reference to KL ~1e-5 per step, but they are not bitwise
   identical to each other or to the reference (which quantises activations to 8 bits itself).
-- 98K context is the largest tested. 128K with BF16 KV does not fit next to the weights; see the report.
+- 98K context is the largest tested (Prism file). 128K with BF16 KV does not fit next to the weights; see the
+  report. With the Huihui default, 65,536 is the expected ceiling and is not yet measured.
 - Each compiled program pins ~1.1 GiB of host RAM; the engine uses four.

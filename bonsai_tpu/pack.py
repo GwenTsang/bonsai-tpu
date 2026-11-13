@@ -1,8 +1,11 @@
-"""On-device conversion of released PTQ1_0 blocks into the resident B4 layout (see kernels.py)."""
+"""On-device conversion of released blocks into the resident layouts (see kernels.py): PTQ1_0 -> B4 (2-bit
+ternary), Q2_K / Q3_K -> P8 (one byte per weight)."""
+import functools
 import numpy as np
 import jax
 import jax.numpy as jnp
-from .quantization import decode_codes
+from .kernels import P8_BIAS
+from .quantization import decode_codes, kquant_codes, kquant_scales, Q2_K
 
 
 @jax.jit
@@ -28,6 +31,42 @@ def b4_from_ptq1(payload, scales, chunk=12416):
     else:
         s = jnp.asarray(np.ascontiguousarray(scales.T).astype(np.float32))
     return {'w': w, 's': s}
+
+
+@functools.partial(jax.jit, static_argnums=1)
+def _kquant_to_p8(blocks, kind):
+    """superblocks uint8 [n, B, bytes] -> uint8 [B*256, n] of code + P8_BIAS."""
+    n, b, _ = blocks.shape
+    codes, _ = kquant_codes(blocks, kind, jnp)
+    return (codes + P8_BIAS).astype(jnp.uint8).reshape(n, b * 256).T
+
+
+def p8_from_kquant(kind, blocks, chunk=640):
+    """Host K-quant view (superblocks [N, K/256, bytes] u8) -> device dict(p u8 [K, N], s f32 [K/128, N]) and,
+    for Q2_K, c f32 [N, K/16]: the per-sub-block offsets -dmin*min that multiply sub-block input sums.
+
+    The sub-block multipliers are folded into the integer codes (weight = d * code), so the kernels only
+    need one signed scale per 256 inputs; it is stored once per 128 so they share the B4 group machinery."""
+    n = blocks.shape[0]
+    parts = [_kquant_to_p8(jnp.asarray(blocks[i:i + chunk]), kind) for i in range(0, n, chunk)]
+    d, dmin = kquant_scales(blocks, kind)
+    if not (np.isfinite(d).all() and (dmin is None or np.isfinite(dmin).all())):
+        raise ValueError('non-finite K-quant scales')
+    mat = {'p': parts[0] if len(parts) == 1 else jnp.concatenate(parts, axis=1),
+           's': jnp.asarray(np.repeat(np.ascontiguousarray(d.T), 2, axis=0))}
+    if kind == Q2_K:
+        mins = np.asarray(blocks[..., :16]) >> 4                                          # [N, B, 16]
+        mat['c'] = jnp.asarray((-dmin[..., None] * mins.astype(np.float32)).reshape(n, -1))
+    return mat
+
+
+def p8_to_dense(mat):
+    """Reference decode of a P8 matrix to float32 [N, K] (tests and small validation only)."""
+    p = np.asarray(mat['p']).astype(np.float32) - P8_BIAS
+    w = (p * np.repeat(np.asarray(mat['s']), 128, axis=0)).T
+    if 'c' in mat:
+        w = w + np.repeat(np.asarray(mat['c']), 16, axis=1)
+    return w
 
 
 def concat_outputs(mats):

@@ -8,8 +8,8 @@
       "apiKey": "local",
       "models": [
         {
-          "id": "ternary-bonsai-2-27b",
-          "name": "Ternary Bonsai 2 27B / Qwen 3.8 (TPU v5e)",
+          "id": "huihui-qwen3.8-27b-abliterated",
+          "name": "Huihui Qwen 3.8 27B abliterated / Ternary Bonsai (TPU v5e)",
           "input": [
             "text"
           ],

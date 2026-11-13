@@ -1,14 +1,17 @@
 """Ternary Bonsai 2 (qwen35 hybrid GDN / attention) single-token decode graph for one TPU.
 
 All ternary matrices stay resident in HBM in the 2-bit B4 layout and are consumed by the int8 Pallas
-GEMV kernel.  Semantics follow PrismML llama.cpp src/models/qwen35.cpp at the pinned revision.
+GEMV kernel.  Matrices a release stores as Q2_K / Q3_K (the abliterated layers of the default Huihui
+build) use the byte-per-weight P8 layout and the same kernels.  Semantics follow PrismML llama.cpp
+src/models/qwen35.cpp at the pinned revision.
 """
 import numpy as np
 import jax
 import jax.numpy as jnp
 from . import kernels
 from .hadamard import fwht_batched, fwht_mxu, grouped_gdn, sign_table
-from .pack import b4_from_ptq1, concat_outputs
+from .gguf import PTQ1_0, Q2_K, Q3_K
+from .pack import b4_from_ptq1, concat_outputs, p8_from_kquant
 from .quantization import decode_codes
 
 HI = jax.lax.Precision.HIGHEST
@@ -59,6 +62,17 @@ def load_params(gguf, log=print):
             raise ValueError(name + ' is not Hadamard-folded; unsupported contract')
         return b4_from_ptq1(*gguf.ternary_blocks(name))
 
+    def matrix(name):
+        """A projection that is ternary in the Prism release but may have been re-quantized by an edit."""
+        kind = gguf.tensors[name]['type']
+        if kind == PTQ1_0:
+            return tern(name)
+        if kind not in (Q2_K, Q3_K):
+            raise ValueError('%s has ggml type %d; supported: PTQ1_0, Q2_K, Q3_K' % (name, kind))
+        if name not in folded:
+            raise ValueError(name + ' is not Hadamard-folded; unsupported contract')
+        return p8_from_kquant(*gguf.kquant_blocks(name))
+
     def dense(name):
         return jnp.asarray(gguf.dense(name))
 
@@ -72,7 +86,7 @@ def load_params(gguf, log=print):
         p = 'blk.%d.' % i
         L = {'attn_norm': dense(p + 'attn_norm.weight'), 'post_norm': dense(p + 'post_attention_norm.weight'),
              'ffn_gu': concat_outputs([tern(p + 'ffn_gate.weight'), tern(p + 'ffn_up.weight')]),
-             'ffn_down': tern(p + 'ffn_down.weight')}
+             'ffn_down': matrix(p + 'ffn_down.weight')}
         if cfg.is_recurrent(i):
             L['qkvz'] = concat_outputs([tern(p + 'attn_qkv.weight'), tern(p + 'attn_gate.weight')])
             L['alpha'] = dense(p + 'ssm_alpha.weight')
@@ -81,13 +95,13 @@ def load_params(gguf, log=print):
             L['dt'] = dense(p + 'ssm_dt.bias')
             L['a'] = dense(p + 'ssm_a')
             L['ssm_norm'] = dense(p + 'ssm_norm.weight')
-            L['out'] = tern(p + 'ssm_out.weight')
+            L['out'] = matrix(p + 'ssm_out.weight')
         else:
             L['qkv'] = concat_outputs([tern(p + 'attn_q.weight'), tern(p + 'attn_k.weight'),
                                        tern(p + 'attn_v.weight')])
             L['q_norm'] = dense(p + 'attn_q_norm.weight')
             L['k_norm'] = dense(p + 'attn_k_norm.weight')
-            L['out'] = tern(p + 'attn_output.weight')
+            L['out'] = matrix(p + 'attn_output.weight')
         layers.append(L)
         if log and i % 8 == 7:
             log('loaded layers', i + 1)
@@ -275,7 +289,7 @@ def linear_many(x, signs, mat, gdn=False):
     """Folded ternary projection for [M, K] activations: fused rotate kernel, then the GEMM kernel."""
     if gdn:
         x = grouped_gdn(x, xp=jnp)
-    return kernels.gemm_rotated(kernels.rotate_for_gemm(x, signs), mat, x.shape[0])
+    return kernels.gemm_rotated(kernels.rotate_for_gemm(x, signs, natural='p' in mat), mat, x.shape[0])
 
 
 def ffn_many(cfg, L, signs, x):

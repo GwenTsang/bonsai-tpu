@@ -16,7 +16,7 @@ msgs = [{'role': 'system', 'content': 'You are a coding agent. To answer you mus
         {'role': 'user', 'content': 'Read module_0.py through module_%d.py one at a time (one tool call per reply), then tell me the sum of all SECRET_i values.' % (TURNS - 2)}]
 rows = []
 for turn in range(TURNS):
-    body = {'model': 'ternary-bonsai-2-27b', 'messages': msgs, 'tools': tools, 'temperature': 0, 'max_tokens': 600, 'stream': True}
+    body = {'model': 'huihui-qwen3.8-27b-abliterated', 'messages': msgs, 'tools': tools, 'temperature': 0, 'max_tokens': 600, 'stream': True}
     req = urllib.request.Request(BASE + '/v1/chat/completions', json.dumps(body).encode(), {'Content-Type': 'application/json'})
     t0 = time.perf_counter(); ttft = None; content = ''; calls = []; last = None
     for line in urllib.request.urlopen(req, timeout=900):

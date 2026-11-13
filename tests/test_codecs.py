@@ -2,7 +2,7 @@ import ctypes
 from pathlib import Path
 import numpy as np
 import pytest
-from bonsai_tpu.quantization import decode_codes, dequantize, encode_ptq1
+from bonsai_tpu.quantization import decode_codes, dequantize, encode_ptq1, dequantize_kquant, kquant_codes, KQUANT_BYTES
 from bonsai_tpu.hadamard import fwht, activation_transform, embedding_inverse, grouped_gdn
 
 LIB = Path('upstream/prism-llama/build/bin/libggml-base.so')
@@ -64,3 +64,23 @@ def test_grouped_head_permutation():
     for k in range(16):
         for r in range(3):
             np.testing.assert_array_equal(y[k,r],x[0,(r*16+k)*128:(r*16+k+1)*128])
+
+
+@pytest.mark.parametrize('kind,name,scale_at', [(10, 'dequantize_row_q2_K', 80), (11, 'dequantize_row_q3_K', 108)])
+def test_kquants_against_c(reference, kind, name, scale_at):
+    """Q2_K / Q3_K superblocks: every byte value at every payload position plus random blocks, bit-exact."""
+    size = KQUANT_BYTES[kind]
+    blocks = np.zeros((256 * scale_at + 2048, size), np.uint8)
+    for j in range(scale_at):
+        blocks[j * 256:(j + 1) * 256, j] = np.arange(256, dtype=np.uint8)
+    rng = np.random.default_rng(kind)
+    blocks[-2048:, :scale_at] = rng.integers(0, 256, (2048, scale_at), dtype=np.uint8)
+    scales = rng.uniform(-4, 4, (len(blocks), (size - scale_at) // 2)).astype('<f2')
+    blocks[:, scale_at:] = scales.view(np.uint8).reshape(len(blocks), -1)
+    expected = np.empty((len(blocks), 256), np.float32)
+    fn = getattr(reference, name)
+    fn.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int64]
+    fn(blocks.ctypes.data, expected.ctypes.data, expected.size)
+    np.testing.assert_array_equal(dequantize_kquant(blocks.tobytes(), kind), expected)
+    codes, _ = kquant_codes(blocks, kind)
+    assert codes.min() >= -124 and codes.max() <= 128          # the range the P8 byte layout relies on

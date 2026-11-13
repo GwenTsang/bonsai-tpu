@@ -8,8 +8,8 @@ import jax
 import jax.numpy as jnp
 from bonsai_tpu import kernels, model as M
 from bonsai_tpu.hadamard import fwht, fwht_batched, fwht_mxu
-from bonsai_tpu.pack import b4_from_ptq1, b4_to_dense
-from bonsai_tpu.quantization import encode_ptq1
+from bonsai_tpu.pack import b4_from_ptq1, b4_to_dense, p8_from_kquant, p8_to_dense
+from bonsai_tpu.quantization import encode_ptq1, dequantize_kquant, KQUANT_BYTES
 
 HI = jax.lax.Precision.HIGHEST
 
@@ -51,6 +51,69 @@ def test_block_diagonal_gemv_algebra():
     assert np.linalg.norm(y / alpha - ref) / np.linalg.norm(ref) < 1e-4       # 16-bit activations
     q = np.round(x * alpha)
     np.testing.assert_allclose(y, dense.astype(np.float64) @ q, rtol=1e-9, atol=1e-6)   # integer-exact part
+
+
+def random_kquant(rng, kind, n, k):
+    """Random Q2_K / Q3_K matrix: superblocks [n, k/256, bytes] and its float32 dense form [n, k]."""
+    size = KQUANT_BYTES[kind]
+    blocks = rng.integers(0, 256, (n, k // 256, size), dtype=np.uint8)
+    at = 108 if kind == 11 else 80
+    scales = rng.uniform(-1, 1, (n, k // 256, (size - at) // 2)).astype('<f2')      # signed, like real Q3_K d
+    blocks[..., at:] = scales.view(np.uint8).reshape(n, k // 256, -1)
+    return blocks, dequantize_kquant(blocks.tobytes(), kind).reshape(n, k)
+
+
+@pytest.fixture
+def interpreted_kernels():
+    kernels.INTERPRET = True          # Pallas interpreter: same kernel bodies, CPU execution
+    yield
+    kernels.INTERPRET = False
+
+
+@pytest.mark.parametrize('kind', [10, 11])
+def test_p8_packing_roundtrip(kind):
+    rng = np.random.default_rng(kind)
+    blocks, dense = random_kquant(rng, kind, 256, 2048)
+    mat = p8_from_kquant(kind, blocks, chunk=100)        # exercises chunked conversion
+    assert mat['p'].shape == (2048, 256) and mat['p'].dtype == jnp.uint8 and mat['s'].shape == (16, 256)
+    assert ('c' in mat) == (kind == 10)
+    np.testing.assert_array_equal(p8_to_dense(mat), dense)
+
+
+@pytest.mark.parametrize('kind', [10, 11])
+def test_p8_kernels_match_dense(kind, interpreted_kernels):
+    """GEMV (int16 activations, exact integer sums) and GEMM (BF16) over a K-quant matrix."""
+    rng = np.random.default_rng(20 + kind)
+    n, k = 256, 2048
+    blocks, dense = random_kquant(rng, kind, n, k)
+    mat = p8_from_kquant(kind, blocks)
+    w = dense.astype(np.float64)
+    x = rng.standard_normal(k).astype(np.float32)
+    y = np.asarray(kernels.gemv(jnp.asarray(x), mat))
+    assert np.linalg.norm(y - w @ x) / np.linalg.norm(w @ x) < 1e-4
+    xm = rng.standard_normal((5, k)).astype(np.float32)
+    ref = xm.astype(np.float64) @ w.T
+    assert np.linalg.norm(np.asarray(kernels.gemm(jnp.asarray(xm), mat)) - ref) / np.linalg.norm(ref) < 5e-3
+    # fused prefill path: rotation in natural column order, then the same GEMM
+    signs = np.sign(rng.standard_normal(k)).astype(np.float32)
+    rot = np.asarray(fwht(xm.astype(np.float64) * signs, 1024))
+    got = np.asarray(kernels.gemm_rotated(kernels.rotate_for_gemm(jnp.asarray(xm), jnp.asarray(signs), natural=True),
+                                          mat, 5))
+    assert np.linalg.norm(got - rot @ w.T) / np.linalg.norm(rot @ w.T) < 5e-3
+
+
+def test_b4_kernels_run_in_interpreter(interpreted_kernels):
+    """The shared kernel bodies still serve the ternary layout (same code path as on the TPU)."""
+    rng = np.random.default_rng(31)
+    n, k = 256, 2048
+    payload, scales, dense = random_matrix(rng, n, k)
+    mat = b4_from_ptq1(payload, scales)
+    x = rng.standard_normal(k).astype(np.float32)
+    ref = dense.astype(np.float64) @ x
+    assert np.linalg.norm(np.asarray(kernels.gemv(jnp.asarray(x), mat)) - ref) / np.linalg.norm(ref) < 1e-4
+    xm = rng.standard_normal((3, k)).astype(np.float32)
+    refm = xm.astype(np.float64) @ dense.astype(np.float64).T
+    assert np.linalg.norm(np.asarray(kernels.gemm(jnp.asarray(xm), mat)) - refm) / np.linalg.norm(refm) < 5e-3
 
 
 def test_half_scale_decode_matches_ieee():
@@ -125,8 +188,10 @@ def test_sampler_modes():
 
 @pytest.fixture(scope='module')
 def tokenizer():
-    path = Path('weights/Ternary-Bonsai-2-27B-PTQ1_0.gguf')
-    if not path.exists():
+    from bonsai_tpu import defaults
+    path = next((p for p in (Path('weights') / defaults.DEFAULT_FILE, Path('weights/Ternary-Bonsai-2-27B-PTQ1_0.gguf'))
+                 if p.exists()), None)
+    if path is None:
         pytest.skip('released GGUF not present locally')
     from bonsai_tpu.gguf import GGUF
     from bonsai_tpu.tokenizer import BonsaiTokenizer
@@ -237,7 +302,37 @@ def test_thinking_parameter_spellings():
     assert t({'enable_thinking': False, 'reasoning_effort': 'high'}, True) == (False, None)
 
 
-def test_default_model_is_the_qwen38_based_release():
+def test_default_model_is_the_huihui_qwen38_release(monkeypatch, tmp_path):
     from bonsai_tpu import defaults
-    assert defaults.HF_REPO == 'prism-ml/Ternary-Bonsai-2-27B-gguf'
+    assert defaults.HF_REPO == defaults.DEFAULT_REPO == 'huihui-ai/Huihui-Qwen3.8-27B-abliterated-GGUF'
+    assert defaults.HF_FILE == 'Huihui-Qwen3.8-27B-abliterated-Ternary-Bonsai-PTQ1_0.gguf'
     assert defaults.resolve_model('/some/path.gguf') == '/some/path.gguf'
+    # with no explicit path the default file of the default repository is what gets requested
+    import huggingface_hub
+    calls = []
+    monkeypatch.setattr(huggingface_hub, 'hf_hub_download', lambda *a, **k: calls.append((a, k)) or 'got')
+    monkeypatch.delenv('BONSAI_MODEL', raising=False)
+    monkeypatch.setenv('BONSAI_WEIGHTS_DIR', str(tmp_path))
+    monkeypatch.setattr(defaults.os.path, 'exists', lambda p: False)
+    assert defaults.resolve_model() == 'got'
+    assert calls[0][0] == (defaults.DEFAULT_REPO, defaults.DEFAULT_FILE)
+
+
+def test_default_release_layout_is_loadable():
+    """The default file mixes PTQ1_0 with Q2_K / Q3_K matrices; every tensor type must be one the loader knows."""
+    from bonsai_tpu import defaults
+    from bonsai_tpu.gguf import GGUF, BLOCKS, PTQ1_0, Q2_K, Q3_K
+    path = Path('weights') / defaults.DEFAULT_FILE
+    if not path.exists():
+        pytest.skip('default GGUF not present locally')
+    g = GGUF(path)
+    assert g.metadata['general.architecture'] == 'qwen35'
+    kinds = {}
+    for name, t in g.tensors.items():
+        assert t['type'] in BLOCKS, name
+        kinds.setdefault(t['type'], []).append(name)
+    assert all(n.endswith(('ffn_down.weight', 'ssm_out.weight')) for k in (Q2_K, Q3_K) for n in kinds.get(k, []))
+    folded = set(g.metadata['prism.hadamard.weight_names'])
+    assert all(n in folded for k in (PTQ1_0, Q2_K, Q3_K) for n in kinds.get(k, []) if n != 'token_embd.weight')
+    kind, blocks = g.kquant_blocks(kinds[Q3_K][0])
+    assert kind == Q3_K and blocks.shape[1:] == (68, 110)

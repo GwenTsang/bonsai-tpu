@@ -7,8 +7,8 @@ import time
 def main(argv=None):
     p = argparse.ArgumentParser(prog='bonsai_tpu')
     p.add_argument('mode', choices=['generate', 'chat', 'serve', 'bench'])
-    p.add_argument('--model', default=None, help='GGUF path (default: download prism-ml/Ternary-Bonsai-2-27B-gguf)')
-    p.add_argument('--ctx', type=int, default=8192, help='context length in tokens')
+    p.add_argument('--model', default=None, help='GGUF path (default: download huihui-ai/Huihui-Qwen3.8-27B-abliterated-GGUF, Ternary-Bonsai-PTQ1_0 file)')
+    p.add_argument('--ctx', type=int, default=65536, help='context length in tokens')
     p.add_argument('--kv', default='bfloat16', choices=['float32', 'bfloat16'], help='KV cache element type')
     p.add_argument('--prompt', default=None)
     p.add_argument('--system', default=None)

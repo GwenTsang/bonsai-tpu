@@ -15,3 +15,7 @@ results/*.f32
 TPU-qwen-27b.md
 reference/tokenize
 .colab_ssh/
+
+# CPU-oracle logits for the default model (regenerate with eval/run_reference.sh)
+results/ref-*/**/*.f32
+results/ref-*/*.f32

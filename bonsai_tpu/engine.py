@@ -112,9 +112,9 @@ def decode_block(cfg, n_max, params, state, token, key, n, temperature, top_k, t
 
 
 class Engine:
-    def __init__(self, gguf_path=None, n_ctx=8192, kv_dtype='bfloat16', log=print, preloaded=None, block=16, max_programs=12,
+    def __init__(self, gguf_path=None, n_ctx=65536, kv_dtype='bfloat16', log=print, preloaded=None, block=16, max_programs=12,
                  max_snapshots=6, snapshot_every=4096, compile_cache='~/.cache/bonsai_tpu/xla',
-                 speculate=True, park_min=1024, park_bytes=24 << 30):
+                 speculate=True, park_min=1024, park_bytes=32 << 30):
         self.park_min = int(park_min)        # shortest conversation worth parking in host RAM
         self.park_bytes = int(park_bytes)    # host RAM budget for parked conversations
         self.parked = []
@@ -521,7 +521,9 @@ class Engine:
         p = self.params
         mats = [p['head']] + [L[k] for L in p['layers'] for k in ('qkvz', 'qkv', 'out', 'ffn_gu', 'ffn_down') if k in L]
         rep = {
-            'ternary_weights_2bit': sum(int(m['w'].size) for m in mats),
+            'ternary_weights_2bit': sum(int(m['w'].size) for m in mats if 'w' in m),
+            'kquant_weights_8bit': sum(int(m['p'].size) + (int(m['c'].size) * 4 if 'c' in m else 0)
+                                       for m in mats if 'p' in m),
             'group_scales': sum(int(m['s'].size) * m['s'].dtype.itemsize for m in mats),
             'token_embedding_ptq1': nbytes(p['embed']),
             'dense_small_tensors': nbytes([{k: v for k, v in L.items() if not isinstance(v, dict)} for L in p['layers']])

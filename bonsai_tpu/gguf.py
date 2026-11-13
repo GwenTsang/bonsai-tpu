@@ -5,8 +5,8 @@ import numpy as np
 
 _FMT = {0: 'B', 1: 'b', 2: 'H', 3: 'h', 4: 'I', 5: 'i', 6: 'f', 7: '?', 10: 'Q', 11: 'q', 12: 'd'}
 # ggml type -> (elements per block, bytes per block)
-BLOCKS = {0: (1, 4), 1: (1, 2), 30: (1, 2), 142: (128, 34), 143: (128, 28)}
-F32, F16, BF16, PQ2_0, PTQ1_0 = 0, 1, 30, 142, 143
+BLOCKS = {0: (1, 4), 1: (1, 2), 10: (256, 84), 11: (256, 110), 30: (1, 2), 142: (128, 34), 143: (128, 28)}
+F32, F16, Q2_K, Q3_K, BF16, PQ2_0, PTQ1_0 = 0, 1, 10, 11, 30, 142, 143
 
 
 class GGUF:
@@ -61,6 +61,8 @@ class GGUF:
     def raw(self, name):
         """Zero-copy uint8 view of a tensor's bytes."""
         t = self.tensors[name]
+        if t['type'] not in BLOCKS:
+            raise ValueError('%s uses ggml type %d, which this engine cannot load' % (name, t['type']))
         group, bs = BLOCKS[t['type']]
         n = int(np.prod(t['shape']))
         if n % group:
@@ -96,3 +98,13 @@ class GGUF:
         payload = blocks[..., :26]
         scales = np.ascontiguousarray(blocks[..., 26:]).view('<f2').reshape(n, k // 128)
         return payload, scales
+
+    def kquant_blocks(self, name):
+        """Q2_K / Q3_K matrix [K, N] (ggml order) -> (ggml type, superblocks uint8 [N, K/256, bytes])."""
+        t = self.tensors[name]
+        if t['type'] not in (Q2_K, Q3_K):
+            raise ValueError('Expected Q2_K or Q3_K for ' + name)
+        k, n = t['shape']
+        if k % 1024:
+            raise ValueError('%s: input width %d is not a multiple of 1024' % (name, k))
+        return t['type'], self.raw(name).reshape(n, k // 256, BLOCKS[t['type']][1])

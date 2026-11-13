@@ -4,7 +4,7 @@ from bonsai_tpu.engine import Engine
 import os,subprocess
 NCTX=int(os.environ.get('BONSAI_NCTX','65536'))
 E=Engine(None,n_ctx=NCTX,kv_dtype='bfloat16',preloaded=(G,CFG,PARAMS))
-res=dict(model='Ternary-Bonsai-2-27B PTQ1_0 (rev 839bd57)',weight_format='B4 2-bit + int16 half scales (from PTQ1_0)',n_ctx=NCTX,kv='bfloat16',batch=1,block=E.block)
+res=dict(model=os.path.basename(G.path),weight_format='B4 2-bit + int16 half scales (from PTQ1_0)'+('; P8 8-bit (from Q2_K/Q3_K)' if any('p' in v for L in PARAMS['layers'] for v in L.values() if isinstance(v,dict)) else ''),n_ctx=NCTX,kv='bfloat16',batch=1,block=E.block)
 res['warmup_s']=round(E.warmup(),1);res['load_s']=round(LOAD_S,1)
 tk=E.tokenizer
 msgs=[{'role':'user','content':'Write a detailed essay about the history of the Roman Empire, covering its founding, expansion, golden age, crises and fall.'}]

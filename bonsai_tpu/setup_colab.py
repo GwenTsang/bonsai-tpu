@@ -16,6 +16,8 @@ import time
 import urllib.request
 from pathlib import Path
 
+from .defaults import MODEL_NAME
+
 ROOT = Path(__file__).resolve().parent.parent
 PI_PACKAGE = '@earendil-works/pi-coding-agent@1.5.2'
 
@@ -54,7 +56,7 @@ def configure_pi(agent_dir, port, ctx):
     provider['baseUrl'] = 'http://127.0.0.1:%d/v1' % port
     provider.setdefault('apiKey', 'local')
     models = provider.setdefault('models', [])
-    entry = next((m for m in models if isinstance(m, dict) and m.get('id') == 'ternary-bonsai-2-27b'), None)
+    entry = next((m for m in models if isinstance(m, dict) and m.get('id') == MODEL_NAME), None)
     if entry is None:
         entry = {}
         models.append(entry)
@@ -272,7 +274,7 @@ def main(argv=None):
             token = a.hf_token or (a.hf_token_file.read_text().strip() if a.hf_token_file else os.environ.get('HF_TOKEN'))
             start_remote(colab, a.session, a.ctx, token)
             start_bridge(colab, a.session, a.port)
-        command = [str(pi), '--provider', 'bonsai-tpu', '--model', 'ternary-bonsai-2-27b']
+        command = [str(pi), '--provider', 'bonsai-tpu', '--model', MODEL_NAME]
         print('Run: PI_CODING_AGENT_DIR=%s %s' % (shlex.quote(str(a.pi_agent_dir.expanduser())), shlex.join(command)))
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
         print('Setup failed: ' + str(exc), file=sys.stderr)

@@ -19,7 +19,7 @@ def test_config_merge_preserves_other_models_credentials_and_is_idempotent(tmp_p
     original = {'extra': True, 'providers': {
         'existing': {'apiKey': 'keep-private', 'models': [{'id': 'other'}]},
         'bonsai-tpu': {'custom': 42, 'models': [{'id': 'keep-this'}, {
-            'id': 'ternary-bonsai-2-27b', 'custom': 3, 'samplingParams': {'temperature': 0.2}}]}}}
+            'id': 'huihui-qwen3.8-27b-abliterated', 'custom': 3, 'samplingParams': {'temperature': 0.2}}]}}}
     path = tmp_path / 'models.json'
     path.write_text(json.dumps(original))
     _, changed = setup.configure_pi(tmp_path, 8123, 32768)
