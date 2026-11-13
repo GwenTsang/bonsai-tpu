@@ -12,4 +12,8 @@ if 'PARAMS' not in globals() or globals().get('RELOAD'):
     RELOAD=False
 else:
     CFG=M.Config(G.metadata)
+import gc
+for _n in [n for n in list(globals()) if n not in ('PARAMS','CFG','G','LOAD_S','RELOAD','M','GGUF') and not n.startswith('_') and type(globals()[n]).__name__ not in ('module','function','type','builtin_function_or_method')]:
+    del globals()[_n]
+gc.collect()
 print('HBM',{k:round(v/2**30,3) for k,v in jax.devices()[0].memory_stats().items() if 'bytes' in k},flush=True)

@@ -42,22 +42,23 @@ def prep_gemv(x):
         v = v.reshape(nt, NG, 4, 32).transpose(0, 2, 1, 3)       # [tile, j, g, i]
         return (eye * v[:, None]).reshape(nt, NG, BK)
     xb = jnp.concatenate([bd(hi), bd(lo)], axis=1).reshape(nt * 2 * NG, BK).astype(jnp.int8)
-    xsum = q.reshape(k // 128, 128).sum(-1).astype(jnp.float32)
+    # per-group sum of q: removes the +1 code offset exactly, in integers, inside the kernel
+    xsum = jnp.broadcast_to(q.reshape(k // 128, 128).sum(-1)[:, None], (k // 128, 128))
     return xb, xsum, alpha[0]
 
 
-def _gemv_kernel(xb, w, s, bn):
+def _gemv_kernel(xb, xsum, w, s, bn):
     k4, n = w.shape
     nt = k4 * 4 // BK
 
-    def body(xr, wr, sr, yr, acc):
+    def body(xr, or_, wr, sr, yr, acc):
         @pl.when(pl.program_id(1) == 0)
         def _():
             acc[...] = jnp.zeros((1, bn), jnp.float32)
         wv = wr[...]
         t = jnp.concatenate([wv & 3, (wv >> 2) & 3, (wv >> 4) & 3, wv >> 6], axis=0).astype(jnp.int8)
         p = jax.lax.dot_general(xr[...], t, (((1,), (0,)), ((), ())), preferred_element_type=jnp.int32)
-        exact = (p[:NG] << 8) + p[NG:]
+        exact = (p[:NG] << 8) + p[NG:] - or_[...][:, :1]
         acc[...] += jnp.sum(exact.astype(jnp.float32) * sr[...], axis=0, keepdims=True)
 
         @pl.when(pl.program_id(1) == nt - 1)
@@ -69,13 +70,14 @@ def _gemv_kernel(xb, w, s, bn):
         grid_spec=pltpu.PrefetchScalarGridSpec(
             num_scalar_prefetch=0,
             in_specs=[pl.BlockSpec((2 * NG, BK), lambda j, g: (g, 0)),
+                      pl.BlockSpec((NG, 128), lambda j, g: (g, 0)),
                       pl.BlockSpec((BK // 4, bn), lambda j, g: (g, j)),
                       pl.BlockSpec((NG, bn), lambda j, g: (g, j))],
             out_specs=pl.BlockSpec((1, bn), lambda j, g: (0, j)),
             scratch_shapes=[pltpu.VMEM((1, bn), jnp.float32)],
             grid=(n // bn, nt)),
         out_shape=jax.ShapeDtypeStruct((1, n), jnp.float32),
-        compiler_params=pltpu.CompilerParams(dimension_semantics=('parallel', 'arbitrary')))(xb, w, s)
+        compiler_params=pltpu.CompilerParams(dimension_semantics=('parallel', 'arbitrary')))(xb, xsum, w, s)
 
 
 def pick_bn(n, target=4352):
@@ -93,9 +95,7 @@ def gemv(x, mat, prepared=None):
     """y[N] = W x for one activation vector; `prepared` reuses prep_gemv(x) across matrices sharing x."""
     xb, xsum, alpha = prepared if prepared is not None else prep_gemv(x)
     w, s = mat['w'], mat['s']
-    y = _gemv_kernel(xb, w, s, pick_bn(w.shape[1]))[0]
-    # codes are t+1: remove the +1 offset, sum_g s[g,n] * sum_{k in g} q[k]
-    return (y - jnp.matmul(xsum, s, precision=jax.lax.Precision.HIGHEST)) / alpha
+    return _gemv_kernel(xb, xsum, w, s, pick_bn(w.shape[1]))[0] / alpha
 
 
 def _gemm_kernel(x, w, s, bm, bn):

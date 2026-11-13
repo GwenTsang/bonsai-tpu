@@ -1,0 +1,38 @@
+[
+ {
+  "variant": "butterfly",
+  "rel_l2": 0.0,
+  "compile_s": 20.3,
+  "ms_per_token": 6.14
+ },
+ {
+  "variant": "dot_highest",
+  "rel_l2": 9.452041638269293e-08,
+  "compile_s": 2.7,
+  "ms_per_token": 1.298
+ },
+ {
+  "variant": "dot_default",
+  "rel_l2": 0.0016649208264425397,
+  "compile_s": 1.6,
+  "ms_per_token": 0.588
+ },
+ {
+  "variant": "kron32_highest",
+  "rel_l2": 9.471892781220959e-08,
+  "compile_s": 2.1,
+  "ms_per_token": 0.632
+ },
+ {
+  "variant": "int8_hilo",
+  "rel_l2": 3.9992584788706154e-05,
+  "compile_s": 5.1,
+  "ms_per_token": 0.702
+ },
+ {
+  "variant": "bf16x3",
+  "rel_l2": 0.0016649208264425397,
+  "compile_s": 3.3,
+  "ms_per_token": 0.603
+ }
+]

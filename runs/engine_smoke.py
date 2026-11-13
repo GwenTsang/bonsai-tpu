@@ -1,4 +1,4 @@
-exec(open('/content/runs/load.py').read())
+exec(open('/content/runs/load.py').read(),globals())
 from bonsai_tpu.engine import Engine
 E=Engine(None,n_ctx=4096,preloaded=(G,CFG,PARAMS))
 tk=E.tokenizer

@@ -12,9 +12,18 @@ PREFILL_BUCKETS = (512, 128, 32, 8)
 TOPK = 64
 
 
+def top_candidates(logits, k=TOPK, width=128):
+    """Exact top-k of a long vector without a full sort: every global top-k element lives in one of the k
+    rows with the largest row maxima, so only k*width candidates are sorted."""
+    rows = logits.reshape(-1, width)
+    _, ridx = jax.lax.top_k(jnp.max(rows, axis=1), k)
+    vals, cidx = jax.lax.top_k(rows[ridx].reshape(-1), k)
+    return vals, ridx[cidx // width] * width + cidx % width
+
+
 def sample_token(logits, key, temperature, top_k, top_p, min_p):
-    """In-graph sampler over the top-TOPK candidates; temperature <= 0 selects argmax."""
-    vals, idx = jax.lax.top_k(logits, TOPK)
+    """In-graph sampler over the exact top-TOPK candidates; temperature <= 0 selects argmax."""
+    vals, idx = top_candidates(logits)
     greedy = idx[0]
     t = jnp.maximum(temperature, 1e-6)
     z = (vals - vals[0]) / t
@@ -28,8 +37,33 @@ def sample_token(logits, key, temperature, top_k, top_p, min_p):
     return jnp.where(temperature <= 0, greedy, choice).astype(jnp.int32)
 
 
+def decode_block(cfg, act_len, n_max, params, state, token, key, n, temperature, top_k, top_p, min_p, stop_ids):
+    """Up to n (<= n_max) autoregressive steps in ONE device program (no host round trip per token).
+
+    Feeds `token`, samples the next, feeds it, ...  Stops right after sampling a stop id (which is recorded
+    but not fed), so the returned state always corresponds exactly to the fed tokens.
+    Returns (sampled[n_max], count, state, last_logits).
+    """
+    def cond(c):
+        i, _, _, _, _, done, _ = c
+        return (i < n) & ~done
+
+    def body(c):
+        i, tok, st, k, out, _, _ = c
+        logits, st = M.decode_step(cfg, params, st, tok, act_len)
+        k, sub = jax.random.split(k)
+        nxt = sample_token(logits, sub, temperature, top_k, top_p, min_p)
+        return i + 1, nxt, st, k, out.at[i].set(nxt), jnp.any(nxt == stop_ids), logits
+
+    init = (jnp.int32(0), token, state, key, jnp.full((n_max,), -1, jnp.int32), jnp.bool_(False),
+            jnp.zeros((cfg.vocab,), jnp.float32))
+    i, _, state, key, out, _, logits = jax.lax.while_loop(cond, body, init)
+    return out, i, state, key, logits
+
+
 class Engine:
-    def __init__(self, gguf_path, n_ctx=8192, kv_dtype='float32', log=print, preloaded=None):
+    def __init__(self, gguf_path, n_ctx=8192, kv_dtype='float32', log=print, preloaded=None, block=8):
+        self.block = int(block)
         self.log = log or (lambda *a, **k: None)
         t = time.perf_counter()
         if preloaded is not None:      # (gguf, cfg, params) already resident, e.g. in a notebook kernel
@@ -69,6 +103,13 @@ class Engine:
                 return sample_token(logits, key, temperature, top_k, top_p, min_p), logits, state
             self._step[act_len] = jax.jit(fn, donate_argnums=(1,))
         return self._step[act_len]
+
+    def _block_fn(self, act_len):
+        k = ('block', act_len, self.block)
+        if k not in self._step:
+            self._step[k] = jax.jit(functools.partial(decode_block, self.cfg, act_len, self.block),
+                                    donate_argnums=(1,))
+        return self._step[k]
 
     def _prefill_fn(self, m, act_len, want_logits):
         k = (m, act_len, want_logits)
@@ -125,17 +166,23 @@ class Engine:
         self.stats = {'prompt_tokens': len(prompt_ids) - n, 'reused_tokens': n, 'prefill_s': t1 - t0,
                       'completion_tokens': 0, 'decode_s': 0.0}
         produced = 0
-        while True:
-            if token in stop or produced >= max_new_tokens or len(self.history) >= self.n_ctx:
-                break
+        stop_arr = jnp.asarray(sorted(stop) or [-1], jnp.int32)
+        while not (token in stop or produced >= max_new_tokens or len(self.history) >= self.n_ctx):
             yield token
             produced += 1
-            key, sub = jax.random.split(key)
-            act = self._act_len(len(self.history) + 1)
-            nxt, logits, self.state = self._step_fn(act)(self.params, self.state, jnp.int32(token), sub, *args)
-            self.history.append(token)
-            self.pending_logits = logits
-            token = int(nxt)
+            # run up to `block` steps on device: feeds `token`, returns the tokens sampled after it
+            budget = min(self.block, max_new_tokens - produced + 1, self.n_ctx - len(self.history))
+            act = self._act_len(len(self.history) + budget)
+            out, cnt, self.state, key, logits = self._block_fn(act)(
+                self.params, self.state, jnp.int32(token), key, jnp.int32(budget), *args, stop_arr)
+            out = np.asarray(out)[:int(cnt)].tolist()
+            self.history.extend([token] + out[:-1])
+            self.pending_logits = None            # logits belong to out[-1]'s predecessor; see below
+            for t in out[:-1]:
+                yield t
+                produced += 1
+            token = out[-1]
+            self._last_logits = logits
             self.stats['completion_tokens'] = produced
             self.stats['decode_s'] = time.perf_counter() - t1
         self.stats['finish_reason'] = 'stop' if token in stop else 'length'

@@ -7,7 +7,7 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 from . import kernels
-from .hadamard import fwht, grouped_gdn, sign_table
+from .hadamard import fwht_mxu, grouped_gdn, sign_table
 from .pack import b4_from_ptq1, concat_outputs
 from .quantization import decode_codes
 
@@ -120,14 +120,14 @@ def rotate(x, signs, gdn=False):
     """Prism activation transform preceding every folded ternary matrix."""
     if gdn:
         x = grouped_gdn(x, xp=jnp)
-    return fwht(x * signs, 1024, jnp)
+    return fwht_mxu(x * signs, jnp, HI)
 
 
 def embed(params, token):
     e = params['embed']
     codes = decode_codes(e['payload'][token], 143, jnp).astype(jnp.float32)      # [G, 128]
     x = (codes * e['scales'][token][:, None]).reshape(-1)
-    return fwht(x, 1024, jnp) * params['signs'][x.shape[0]]
+    return fwht_mxu(x, jnp, HI) * params['signs'][x.shape[0]]
 
 
 def rope(x, pos, cfg):
@@ -159,11 +159,14 @@ def recurrent_mixer(cfg, L, signs, h, conv_state, gdn_state):
     q, k = qk[:hk][heads], qk[hk:][heads]                                         # [hv, dk]
     v = conv[2 * hk * dk:].reshape(hv, dk)
     gate = L['a'] * jax.nn.softplus(alpha + L['dt'])
-    s = gdn_state * jnp.exp(gate)[:, None, None]
-    pred = jnp.sum(s * k[:, None, :], axis=-1)
-    delta = (v - pred) * beta[:, None]
-    s = s + delta[:, :, None] * k[:, None, :]
-    out = jnp.sum(s * q[:, None, :], axis=-1) * (dk ** -0.5)
+    # Gated delta rule with two reads of the old state and one write:
+    #   S' = e^g S + delta k^T,  delta = (v - e^g S k) beta,  out = S' q = e^g S q + delta (k.q)
+    decay = jnp.exp(gate)[:, None]
+    sk = jnp.sum(gdn_state * k[:, None, :], axis=-1)
+    sq = jnp.sum(gdn_state * q[:, None, :], axis=-1)
+    delta = (v - decay * sk) * beta[:, None]
+    s = decay[:, :, None] * gdn_state + delta[:, :, None] * k[:, None, :]
+    out = (decay * sq + delta * jnp.sum(k * q, axis=-1, keepdims=True)) * (dk ** -0.5)
     out = (rms_norm(out, L['ssm_norm']) * jax.nn.silu(z.reshape(hv, dk))).reshape(-1)
     y = kernels.gemv(rotate(out, signs[cfg.gdn_inner], gdn=True), L['out'])
     return y, window[1:], s
@@ -232,7 +235,7 @@ def embed_many(params, tokens):
     e = params['embed']
     codes = decode_codes(e['payload'][tokens], 143, jnp).astype(jnp.float32)      # [M, G, 128]
     x = (codes * e['scales'][tokens][:, :, None]).reshape(tokens.shape[0], -1)
-    return fwht(x, 1024, jnp) * params['signs'][x.shape[-1]]
+    return fwht_mxu(x, jnp, HI) * params['signs'][x.shape[-1]]
 
 
 def ffn_many(cfg, L, signs, x):

@@ -1,0 +1,9 @@
+{
+ "kernels_only_ms": 11.00735800014263,
+ "kernels_plus_prep_ms": 11.272490000010293,
+ "kernels_prep_rotate_ms": 11.523259500108907,
+ "matrix_bytes": 7199539200,
+ "n_calls": 257,
+ "GBps_kernels_only": 654.0660528990436,
+ "full_step_ms": 13.894569499825593
+}
