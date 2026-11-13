@@ -98,3 +98,60 @@ Hardware/kernel references consulted:
 5. All full-model TPU generation, decode/prefill optimization, long contexts, quality evaluation, interface and final report requirements remain active.
 
 All launched experiments this turn completed. Session left intact. Artifacts are durable locally; sources, tests, numeric benchmark JSON and reference logits tracked in Git. Full model and regenerable binary vectors/captures are ignored to avoid placing gigabytes in Git.
+
+## 2026-11-13 — Full-model TPU decode and prefill; int8 block-diagonal kernel (session 3, Claude)
+
+Resumed from the Codex transcript. Earlier "K RoPE mismatch" (38% error) was a capture-name collision
+(`Kcur` is emitted both before normalisation and after RoPE); Q RoPE matched at 3e-7 with the same code and
+attention outputs with cache continuation matched, so RoPE was correct. The ~0.5% per-projection deviation
+from the CPU oracle is the oracle's own Q8_0 activation quantisation (`vec_dot_type = Q8_0` for PTQ1_0),
+i.e. the CPU reference is itself not an exact evaluation of the ternary model.
+
+### Decode-regime kernel study (all chained in one jitted program, 8 distinct 5120x17408 matrices)
+
+Per-matrix medians, results in gemv-variants.json, pallas-chain.json, i8-kernels.json, bd-kernel.json,
+t5-kernel.json. Standalone timings in the previous entry included ~0.4 ms of dispatch and are superseded.
+
+| Variant | M=1 ms/matrix | Note |
+|---|---:|---|
+| XLA fused u32 unpack, FP32 or BF16 | 0.152 | elementwise reduce path, unpack-bound |
+| XLA unpack only / read only | 0.125 / 0.057 | unpack in 32-bit lanes dominates |
+| XLA same, M>=2 | 0.70-1.12 | falls off the fused path, materialises weights |
+| XLA int8 pre-expanded (1 byte/weight) | 0.196 | 4x bytes: slower than packed; HBM-bound |
+| Pallas u32 unpack -> BF16 (previous kernel) | 0.140 | unpack-bound |
+| Pallas u8 lanes, int8 MXU, 8 dots/tile | 0.064 | unpack nearly free |
+| **Pallas u8 lanes, block-diagonal int8, 1 dot/tile** | **0.061** | equals pure-read floor 0.061 |
+| T5 (5 trits/byte, 1.6 bit) i32 / i16-mul / i16-shift-add | 0.114 / 0.131 / 0.169 | read floor 0.057 |
+
+Findings:
+- Mosaic supports bitwise ops on i8 vectors but no i8 arithmetic, and cannot load f16. Shift+mask
+  unpacking in 8-bit lanes costs ~nothing; widening to 32-bit lanes costs more than the matmul.
+- Decode is HBM-bandwidth-bound: ~25 MB (2-bit weights + FP32 scales) per 0.061 ms ~= 410 GB/s, the same
+  rate as a kernel that only reads. Tile size does not matter between 0.5 and 4.4 MB.
+- The denser 1.6-bit packing is SLOWER on this hardware (base-3 digit extraction needs 16/32-bit
+  multiplies): 0.114 ms vs 0.061 ms although it reads 20% fewer bytes. "Smallest format" loses.
+- Pre-expanded int8 weights lose too (bandwidth). 2-bit with byte-lane unpack is the optimum found.
+
+Chosen decode kernel ("B4 block-diagonal"): weights uint8 [K/4, N], bit pair j of byte row 32g+i holds
+code t+1 for input 128g+32j+i, so four whole-tile shift/masks give four contiguous planes. Activation is
+quantised to 16 bits (global per-vector scale), split into signed high/low bytes, and laid out
+block-diagonally: row g of the operand carries only scale group g. One int8 MXU product per 1024-input
+tile yields every group's exact integer partial sum; `256*hi + lo` is exact in int32; a single FP32
+multiply by the group scale and a sum over 8 rows finish the tile. The t+1 offset is removed with a
+40xN correction. Error vs float64 on random data: 3.2e-5 relative (16-bit activations) — more precise
+than the CPU reference's 8-bit activations and than BF16.
+
+### Full model
+
+- On-device PTQ1_0 -> B4 conversion (exact decode validated earlier), matrices sharing an input fused
+  ([qkv|gate], [ffn_gate|ffn_up], [q|k|v]). Load 12.7 s from page cache. HBM in use 7.35 GiB.
+- 64-layer decode step, single XLA program, 52 s first compile.
+- Reference logits ("The capital of France is", 8 greedy steps): identical argmax every step, relative
+  L2 0.21-0.32%, KL(ref||ours) 5e-7..7e-5 (first-logits.json).
+- **Decode 20.65 ms/token median = 48.4 tok/s** (30 steps, min 20.39 ms), logits left on device.
+  7.35 GiB / 410 GB/s = 17.9 ms is the bandwidth floor for this layout, so ~2.7 ms is everything else.
+- Batched prefill: B4 GEMM kernel (8-bit-lane unpack, scale folded into BF16 weights in VMEM, FP32
+  accumulate; 0.60 ms per matrix at M=512 ~= 150 TFLOP/s, 0.175 ms at M=128; gemm-b4.json).
+  256-token chunk: 0.205 s = 1247 tok/s with a sequential GDN scan. Batched vs token-by-token on the same
+  256 tokens: logits rel L2 0.13%, KL 9e-6, GDN state 0.5%, K cache 0.44% (BF16 prefill vs 16-bit decode).
+  Prefill-then-decode vs CPU reference: same argmax, KL <= 7e-5 (prefill-check.json).

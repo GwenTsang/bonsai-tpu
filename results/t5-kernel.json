@@ -1,0 +1,114 @@
+[
+ {
+  "mode": "shadd",
+  "bn": 1088,
+  "sdt": null,
+  "error": "ValueError(\"The Pallas TPU lowering currently requires that the last two dimensions of your block shape are divisible by 8 and 128 respectively, or be equal to the respective dimensions of the overall array. Block spec for args[1] in pallas_call body at /tmp/ipykernel_1659/795296293.py:23 has block shape (Blocked(block_size=1024), Blocked(block_size=1088)), array shape (1024, 17408), and index_map"
+ },
+ {
+  "mode": "shadd",
+  "bn": 2176,
+  "sdt": null,
+  "rel_l2": 3.2519283741874294e-05,
+  "compile_s": 6.13,
+  "ms": 0.1688,
+  "min_ms": 0.1636
+ },
+ {
+  "mode": "shadd",
+  "bn": 4352,
+  "sdt": null,
+  "rel_l2": 3.2519283741874294e-05,
+  "compile_s": 10.88,
+  "ms": 0.1814,
+  "min_ms": 0.1801
+ },
+ {
+  "mode": "mul",
+  "bn": 1088,
+  "sdt": null,
+  "error": "ValueError(\"The Pallas TPU lowering currently requires that the last two dimensions of your block shape are divisible by 8 and 128 respectively, or be equal to the respective dimensions of the overall array. Block spec for args[1] in pallas_call body at /tmp/ipykernel_1659/795296293.py:23 has block shape (Blocked(block_size=1024), Blocked(block_size=1088)), array shape (1024, 17408), and index_map"
+ },
+ {
+  "mode": "mul",
+  "bn": 2176,
+  "sdt": null,
+  "rel_l2": 3.2519283741874294e-05,
+  "compile_s": 5.29,
+  "ms": 0.1311,
+  "min_ms": 0.1304
+ },
+ {
+  "mode": "mul",
+  "bn": 4352,
+  "sdt": null,
+  "rel_l2": 3.2519283741874294e-05,
+  "compile_s": 8.25,
+  "ms": 0.1388,
+  "min_ms": 0.137
+ },
+ {
+  "mode": "i32",
+  "bn": 1088,
+  "sdt": null,
+  "error": "ValueError(\"The Pallas TPU lowering currently requires that the last two dimensions of your block shape are divisible by 8 and 128 respectively, or be equal to the respective dimensions of the overall array. Block spec for args[1] in pallas_call body at /tmp/ipykernel_1659/795296293.py:23 has block shape (Blocked(block_size=1024), Blocked(block_size=1088)), array shape (1024, 17408), and index_map"
+ },
+ {
+  "mode": "i32",
+  "bn": 2176,
+  "sdt": null,
+  "rel_l2": 3.2519283741874294e-05,
+  "compile_s": 4.65,
+  "ms": 0.1142,
+  "min_ms": 0.11
+ },
+ {
+  "mode": "i32",
+  "bn": 4352,
+  "sdt": null,
+  "rel_l2": 3.2519283741874294e-05,
+  "compile_s": 6.73,
+  "ms": 0.1201,
+  "min_ms": 0.1127
+ },
+ {
+  "mode": "read",
+  "bn": 1088,
+  "sdt": null,
+  "error": "ValueError(\"The Pallas TPU lowering currently requires that the last two dimensions of your block shape are divisible by 8 and 128 respectively, or be equal to the respective dimensions of the overall array. Block spec for args[1] in pallas_call body at /tmp/ipykernel_1659/795296293.py:23 has block shape (Blocked(block_size=1024), Blocked(block_size=1088)), array shape (1024, 17408), and index_map"
+ },
+ {
+  "mode": "read",
+  "bn": 2176,
+  "sdt": null,
+  "compile_s": 2.76,
+  "ms": 0.0571,
+  "min_ms": 0.0546
+ },
+ {
+  "mode": "read",
+  "bn": 4352,
+  "sdt": null,
+  "compile_s": 2.75,
+  "ms": 0.0565,
+  "min_ms": 0.0541
+ },
+ {
+  "mode": "shadd",
+  "bn": 1088,
+  "sdt": "f16",
+  "error": "ValueError(\"The Pallas TPU lowering currently requires that the last two dimensions of your block shape are divisible by 8 and 128 respectively, or be equal to the respective dimensions of the overall array. Block spec for args[1] in pallas_call body at /tmp/ipykernel_1659/795296293.py:23 has block shape (Blocked(block_size=1024), Blocked(block_size=1088)), array shape (1024, 17408), and index_map"
+ },
+ {
+  "mode": "shadd",
+  "bn": 2176,
+  "sdt": "f16",
+  "error": "JaxRuntimeError('INTERNAL: Mosaic failed to compile TPU kernel with MLIR module name `<no name>` HLO name `gemv.1`: Invalid vector type for load\\n\\nat location: loc(\"get:\"(\"get/get\"(callsite(\"kernel.<locals>.body\"(\"/tmp/ipykernel_1659/795296293.py\":37:15 to :30) at \"kernel.<locals>.body\"(\"/tmp/ipykernel_1659/795296293.py\":37:15 to :30)))))\\n\\nThe MLIR operation involved:\\n  %29762 = \"tpu.load\"(%29"
+ },
+ {
+  "mode": "shadd",
+  "bn": 4352,
+  "sdt": "f16",
+  "error": "JaxRuntimeError('INTERNAL: Mosaic failed to compile TPU kernel with MLIR module name `<no name>` HLO name `gemv.1`: Invalid vector type for load\\n\\nat location: loc(\"get:\"(\"get/get\"(callsite(\"kernel.<locals>.body\"(\"/tmp/ipykernel_1659/795296293.py\":37:15 to :30) at \"kernel.<locals>.body\"(\"/tmp/ipykernel_1659/795296293.py\":37:15 to :30)))))\\n\\nThe MLIR operation involved:\\n  %58027 = \"tpu.load\"(%58"
+ }
+]

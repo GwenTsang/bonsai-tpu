@@ -96,3 +96,53 @@ def gemv(x, mat, prepared=None):
     y = _gemv_kernel(xb, w, s, pick_bn(w.shape[1]))[0]
     # codes are t+1: remove the +1 offset, sum_g s[g,n] * sum_{k in g} q[k]
     return (y - jnp.matmul(xsum, s, precision=jax.lax.Precision.HIGHEST)) / alpha
+
+
+def _gemm_kernel(x, w, s, bm, bn):
+    m, k = x.shape
+    n = w.shape[1]
+    nt = k // BK
+    q = BK // 4
+
+    def body(xr, wr, sr, yr, acc):
+        @pl.when(pl.program_id(2) == 0)
+        def _():
+            acc[...] = jnp.zeros((bm, bn), jnp.float32)
+        wv, sv, xv = wr[...], sr[...], xr[...]
+        srep = jnp.concatenate([jnp.broadcast_to(sv[g:g + 1], (32, bn)) for g in range(NG)], axis=0)
+        tot = acc[...]
+        for j, plane in enumerate((wv & 3, (wv >> 2) & 3, (wv >> 4) & 3, wv >> 6)):
+            wj = ((plane.astype(jnp.int32).astype(jnp.float32) - 1.0) * srep).astype(jnp.bfloat16)
+            tot = tot + jax.lax.dot_general(xv[:, j * q:(j + 1) * q], wj, (((1,), (0,)), ((), ())),
+                                            preferred_element_type=jnp.float32)
+        acc[...] = tot
+
+        @pl.when(pl.program_id(2) == nt - 1)
+        def _():
+            yr[...] = acc[...]
+
+    return pl.pallas_call(
+        body,
+        grid_spec=pltpu.PrefetchScalarGridSpec(
+            num_scalar_prefetch=0,
+            in_specs=[pl.BlockSpec((bm, BK), lambda i, j, g: (i, g)),
+                      pl.BlockSpec((q, bn), lambda i, j, g: (g, j)),
+                      pl.BlockSpec((NG, bn), lambda i, j, g: (g, j))],
+            out_specs=pl.BlockSpec((bm, bn), lambda i, j, g: (i, j)),
+            scratch_shapes=[pltpu.VMEM((bm, bn), jnp.float32)],
+            grid=(m // bm, n // bn, nt)),
+        out_shape=jax.ShapeDtypeStruct((m, n), jnp.float32),
+        compiler_params=pltpu.CompilerParams(dimension_semantics=('parallel', 'parallel', 'arbitrary')))(x, w, s)
+
+
+def gemm(x, mat, bm_max=256):
+    """y[M, N] = x[M, K] W^T for prompt processing.  Weights are reconstructed as BF16 (scale folded) in
+    VMEM; activations are BF16; accumulation is FP32."""
+    m, k = x.shape
+    w, s = mat['w'], mat['s']
+    bm = min(bm_max, -(-m // 8) * 8)
+    mp = -(-m // bm) * bm
+    xp = x.reshape(m, k // BK, NG, 4, 32).transpose(0, 1, 3, 2, 4).reshape(m, k).astype(jnp.bfloat16)
+    if mp != m:
+        xp = jnp.pad(xp, ((0, mp - m), (0, 0)))
+    return _gemm_kernel(xp, w, s, bm, pick_bn(w.shape[1], 2176))[:m]

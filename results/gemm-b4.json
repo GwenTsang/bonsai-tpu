@@ -1,0 +1,106 @@
+[
+ {
+  "M": 8,
+  "bm": 8,
+  "bn": 2176,
+  "mode": "planes",
+  "rel_l2": 0.00240557721480078,
+  "compile_s": 0.54,
+  "ms": 0.1276,
+  "min_ms": 0.1256,
+  "tflops": 11.2
+ },
+ {
+  "M": 8,
+  "bm": 8,
+  "bn": 2176,
+  "mode": "cat",
+  "rel_l2": 0.0024055755954822786,
+  "compile_s": 0.65,
+  "ms": 0.1469,
+  "min_ms": 0.1461,
+  "tflops": 9.7
+ },
+ {
+  "M": 128,
+  "bm": 128,
+  "bn": 2176,
+  "mode": "planes",
+  "compile_s": 0.89,
+  "ms": 0.1752,
+  "min_ms": 0.1676,
+  "tflops": 130.2
+ },
+ {
+  "M": 128,
+  "bm": 128,
+  "bn": 2176,
+  "mode": "cat",
+  "compile_s": 0.99,
+  "ms": 0.2124,
+  "min_ms": 0.2111,
+  "tflops": 107.4
+ },
+ {
+  "M": 512,
+  "bm": 256,
+  "bn": 2176,
+  "mode": "planes",
+  "compile_s": 1.4,
+  "ms": 0.6032,
+  "min_ms": 0.6006,
+  "tflops": 151.3
+ },
+ {
+  "M": 512,
+  "bm": 512,
+  "bn": 2176,
+  "mode": "planes",
+  "error": "JaxRuntimeError('RESOURCE_EXHAUSTED: E1001: CompileTimeScopedVmemOom:\\nRan out of memory in memory space vmem while allocating on stack for %g.8 = f32[512,17408]{1,0:T(8,128)S(1)} custom-call(%copy.10.xr, %copy-done.2, %copy-done.3), custom_call_target=\"tpu_custom_call\", operand_layout_constraints={bf16[512,5120]{1,0}, u8[1280,17408]{1,0}, f32[40,17408]{1,0}}, frontend_attributes={kernel_metadata="
+ },
+ {
+  "M": 512,
+  "bm": 512,
+  "bn": 2176,
+  "mode": "cat",
+  "error": "JaxRuntimeError('RESOURCE_EXHAUSTED: E1001: CompileTimeScopedVmemOom:\\nRan out of memory in memory space vmem while allocating on stack for %g.8 = f32[512,17408]{1,0:T(8,128)S(1)} custom-call(%copy.10.xr, %copy-done.2, %copy-done.3), custom_call_target=\"tpu_custom_call\", operand_layout_constraints={bf16[512,5120]{1,0}, u8[1280,17408]{1,0}, f32[40,17408]{1,0}}, frontend_attributes={kernel_metadata="
+ },
+ {
+  "M": 512,
+  "bm": 512,
+  "bn": 1024,
+  "mode": "planes",
+  "compile_s": 1.13,
+  "ms": 0.6074,
+  "min_ms": 0.6058,
+  "tflops": 150.3
+ },
+ {
+  "M": 512,
+  "bm": 512,
+  "bn": 4352,
+  "mode": "planes",
+  "error": "JaxRuntimeError('RESOURCE_EXHAUSTED: E1001: CompileTimeScopedVmemOom:\\nRan out of memory in memory space vmem while allocating on stack for %g.8 = f32[512,17408]{1,0:T(8,128)S(1)} custom-call(%copy.10.xr, %copy-done.2, %copy-done.3), custom_call_target=\"tpu_custom_call\", operand_layout_constraints={bf16[512,5120]{1,0}, u8[1280,17408]{1,0}, f32[40,17408]{1,0}}, frontend_attributes={kernel_metadata="
+ },
+ {
+  "M": 2048,
+  "bm": 512,
+  "bn": 2176,
+  "mode": "planes",
+  "error": "JaxRuntimeError('RESOURCE_EXHAUSTED: E1001: CompileTimeScopedVmemOom:\\nRan out of memory in memory space vmem while allocating on stack for %g.8 = f32[2048,17408]{1,0:T(8,128)} custom-call(%copy.10.xr, %custom-call.1, %custom-call.9), custom_call_target=\"tpu_custom_call\", operand_layout_constraints={bf16[2048,5120]{1,0}, u8[1280,17408]{1,0}, f32[40,17408]{1,0}}, frontend_attributes={kernel_metadat"
+ },
+ {
+  "M": 2048,
+  "bm": 1024,
+  "bn": 2176,
+  "mode": "planes",
+  "error": "JaxRuntimeError('RESOURCE_EXHAUSTED: E1001: CompileTimeScopedVmemOom:\\nRan out of memory in memory space vmem while allocating on stack for %g.8 = f32[2048,17408]{1,0:T(8,128)} custom-call(%copy.10.xr, %custom-call.1, %custom-call.9), custom_call_target=\"tpu_custom_call\", operand_layout_constraints={bf16[2048,5120]{1,0}, u8[1280,17408]{1,0}, f32[40,17408]{1,0}}, frontend_attributes={kernel_metadat"
+ },
+ {
+  "M": 2048,
+  "bm": 2048,
+  "bn": 2176,
+  "mode": "planes",
+  "error": "JaxRuntimeError('RESOURCE_EXHAUSTED: E1001: CompileTimeScopedVmemOom:\\nRan out of memory in memory space vmem while allocating on stack for %g.8 = f32[2048,17408]{1,0:T(8,128)} custom-call(%copy.10.xr, %custom-call.1, %custom-call.9), custom_call_target=\"tpu_custom_call\", operand_layout_constraints={bf16[2048,5120]{1,0}, u8[1280,17408]{1,0}, f32[40,17408]{1,0}}, frontend_attributes={kernel_metadat"
+ }
+]
