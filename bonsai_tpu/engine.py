@@ -442,6 +442,33 @@ class Engine:
                                                     enable_thinking=enable_thinking, **tk)
         yield from self.generate(prompt, **kw)
 
+    def memory_report(self):
+        """HBM budget by category (bytes), from the resident arrays, plus the allocator's own counters."""
+        def nbytes(tree):
+            return int(sum(x.size * x.dtype.itemsize for x in jax.tree.leaves(tree)))
+        p = self.params
+        mats = [p['head']] + [L[k] for L in p['layers'] for k in ('qkvz', 'qkv', 'out', 'ffn_gu', 'ffn_down') if k in L]
+        rep = {
+            'ternary_weights_2bit': sum(int(m['w'].size) for m in mats),
+            'group_scales': sum(int(m['s'].size) * m['s'].dtype.itemsize for m in mats),
+            'token_embedding_ptq1': nbytes(p['embed']),
+            'dense_small_tensors': nbytes([{k: v for k, v in L.items() if not isinstance(v, dict)} for L in p['layers']])
+            + nbytes(p['out_norm']) + nbytes(p['signs']),
+            'kv_cache': nbytes((self.state['k'], self.state['v'])),
+            'recurrent_state': nbytes((self.state['conv'], self.state['gdn'])),
+            'checkpoints': nbytes([(sn['conv'], sn['gdn']) for sn in self.snapshots]),
+        }
+        rep['accounted_total'] = sum(rep.values())
+        rep['allocator'] = self.memory()
+        rep['host_parked_bytes'] = sum(s_['bytes'] for s_ in self.parked)
+        try:
+            for line in open('/proc/self/status'):
+                if line.startswith(('VmRSS', 'RssAnon')):
+                    rep['host_' + line.split(':')[0]] = int(line.split()[1]) * 1024
+        except OSError:
+            pass
+        return rep
+
     def memory(self):
         s = jax.devices()[0].memory_stats()
         return {k: s[k] for k in ('bytes_in_use', 'peak_bytes_in_use', 'bytes_limit') if k in s}

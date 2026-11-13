@@ -1,0 +1,41 @@
+{
+ "n_ctx": 98304,
+ "kv": "bfloat16",
+ "rows": [
+  {
+   "prompt_tokens": 1968,
+   "prefill_s": [
+    0.9468416279996745,
+    0.9459145580003678
+   ],
+   "decode_tok_s": [
+    70.98607206345639,
+    70.41188572354018
+   ],
+   "prefill_tok_s_warm": 2080.526177924872,
+   "first_prefill_s_incl_compile": 0.9468416279996745,
+   "hbm_in_use_gib": 13.700507164001465,
+   "hbm_peak_gib": 15.743826866149902
+  },
+  {
+   "prompt_tokens": 97920,
+   "prefill_s": [
+    76.5879589720007,
+    76.58825658100068
+   ],
+   "decode_tok_s": [
+    42.37081311380208,
+    42.14923848440865
+   ],
+   "prefill_tok_s_warm": 1278.524990269737,
+   "first_prefill_s_incl_compile": 76.5879589720007,
+   "hbm_in_use_gib": 13.996405601501465,
+   "hbm_peak_gib": 15.743826866149902
+  }
+ ],
+ "hbm": {
+  "bytes_in_use": 15028526080,
+  "peak_bytes_in_use": 16904805376,
+  "bytes_limit": 16909336064
+ }
+}

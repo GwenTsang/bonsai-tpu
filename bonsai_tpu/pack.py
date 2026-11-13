@@ -16,11 +16,17 @@ def _ptq1_to_b4(payload):
 
 
 def b4_from_ptq1(payload, scales, chunk=12416):
-    """Host PTQ1 views (payload [N,G,26] u8, scales [N,G] f16) -> device dict(w u8 [K/4,N], s f32 [G,N])."""
+    """Host PTQ1 views (payload [N,G,26] u8, scales [N,G] f16) -> device dict(w u8 [K/4,N], s i16 [G,N])."""
     n = payload.shape[0]
     parts = [_ptq1_to_b4(jnp.asarray(payload[i:i + chunk])) for i in range(0, n, chunk)]
     w = parts[0] if len(parts) == 1 else jnp.concatenate(parts, axis=1)
-    s = jnp.asarray(np.ascontiguousarray(scales.T).astype(np.float32))
+    if (scales < 0).any() or not np.isfinite(scales).all():
+        raise ValueError('unsupported group scales (negative or non-finite)')
+    # scales stay in their released 16-bit form (raw IEEE-half bits); kernels decode them with integer ops
+    if scales.max() < 64:        # the kernels' integer half decode covers [0, 128)
+        s = jnp.asarray(np.ascontiguousarray(scales.T).astype(np.float16).view(np.int16))
+    else:
+        s = jnp.asarray(np.ascontiguousarray(scales.T).astype(np.float32))
     return {'w': w, 's': s}
 
 
@@ -34,6 +40,7 @@ def b4_to_dense(mat):
     """Reference decode of a B4 matrix to float32 [N, K] (tests and small validation only)."""
     w = np.asarray(mat['w'])
     s = np.asarray(mat['s'])
+    s = s.view(np.float16).astype(np.float32) if s.dtype == np.int16 else s
     g = s.shape[0]
     n = w.shape[1]
     b = w.reshape(g, 32, n)

@@ -1,0 +1,18 @@
+{
+ "ternary_weights_2bit": 6399590400,
+ "group_scales_f32": 799948800,
+ "token_embedding_ptq1": 297984000,
+ "dense_small_tensors": 105068544,
+ "kv_cache": 4563402752,
+ "recurrent_state": 156893184,
+ "checkpoints": 941359104,
+ "accounted_total": 13264246784,
+ "allocator": {
+  "bytes_in_use": 13378911744,
+  "peak_bytes_in_use": 16904805376,
+  "bytes_limit": 16909336064
+ },
+ "host_parked_bytes": 0,
+ "host_VmRSS": 21572595712,
+ "host_RssAnon": 15344144384
+}

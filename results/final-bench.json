@@ -1,0 +1,112 @@
+{
+ "model": "Ternary-Bonsai-2-27B PTQ1_0 (rev 839bd57)",
+ "weight_format": "B4 2-bit + int16 half scales (from PTQ1_0)",
+ "n_ctx": 65536,
+ "kv": "bfloat16",
+ "batch": 1,
+ "block": 16,
+ "warmup_s": 135.2,
+ "load_s": 14.1,
+ "decode_tok_s_greedy": {
+  "trials": [
+   77.64164127443486,
+   77.55602388530521,
+   77.52483745023737,
+   77.60294136876685,
+   77.6132640007879
+  ],
+  "median": 77.60294136876685,
+  "min": 77.52483745023737,
+  "max": 77.64164127443486,
+  "tokens": 512
+ },
+ "ttft_s_37tok_prompt": {
+  "trials": [
+   0.049010605000148644,
+   0.048532783999689855,
+   0.0484434149984736,
+   0.048623704999045,
+   0.04853513399939402
+  ],
+  "median": 0.04853513399939402
+ },
+ "decode_tok_s_sampling": {
+  "trials": [
+   77.3294095903017,
+   77.55706496670138,
+   77.61211397941491
+  ],
+  "median": 77.55706496670138
+ },
+ "prefill": [
+  {
+   "prompt_tokens": 512,
+   "prefill_s": [
+    0.23850833399956173,
+    0.23775220399875252,
+    0.23772331399959512
+   ],
+   "prefill_tok_s": 2153.5026443022434,
+   "decode_tok_s_after": 75.79031743486021
+  },
+  {
+   "prompt_tokens": 2048,
+   "prefill_s": [
+    0.9443759080004384,
+    0.9452173770005174,
+    0.9450951779999741
+   ],
+   "prefill_tok_s": 2166.9775147239784,
+   "decode_tok_s_after": 75.61743261276015
+  },
+  {
+   "prompt_tokens": 8192,
+   "prefill_s": [
+    3.8822763089992804,
+    3.8827544300002046,
+    3.882162761001382
+   ],
+   "prefill_tok_s": 2110.102256506215,
+   "decode_tok_s_after": 71.77007579729145
+  },
+  {
+   "prompt_tokens": 16384,
+   "prefill_s": [
+    8.208848591999413,
+    8.208845822000512,
+    8.208810052001354
+   ],
+   "prefill_tok_s": 1995.89569048663,
+   "decode_tok_s_after": 67.97975887388776
+  },
+  {
+   "prompt_tokens": 32768,
+   "prefill_s": [
+    18.201235271999394,
+    18.201104371999463,
+    18.201797861998784
+   ],
+   "prefill_tok_s": 1800.3173691408724,
+   "decode_tok_s_after": 60.94674793469117
+  }
+ ],
+ "memory": {
+  "ternary_weights_2bit": 6399590400,
+  "group_scales": 399974400,
+  "token_embedding_ptq1": 297984000,
+  "dense_small_tensors": 105068544,
+  "kv_cache": 4563402752,
+  "recurrent_state": 156893184,
+  "checkpoints": 941359104,
+  "accounted_total": 12864272384,
+  "allocator": {
+   "bytes_in_use": 12978890752,
+   "peak_bytes_in_use": 16904805376,
+   "bytes_limit": 16909336064
+  },
+  "host_parked_bytes": 0,
+  "host_VmRSS": 21854273536,
+  "host_RssAnon": 15625670656
+ },
+ "commit": "03c42eb+int16scales"
+}

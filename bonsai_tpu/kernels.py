@@ -3,7 +3,7 @@
 B4 layout for a matrix W[N, K] (N outputs, K inputs, K % 1024 == 0, scale groups of 128 inputs):
   w: uint8 [K/4, N].  Byte row r = 32*g + i; bit pair j (bits 2j, 2j+1) holds code(k, n) = t + 1 in {0,1,2}
      for input k = 128*g + 32*j + i.  One whole-tile shift+mask therefore yields 4 contiguous sub-blocks.
-  s: float32 [K/128, N] group scales.
+  s: int16 [K/128, N] group scales as raw IEEE-half bit patterns (decoded in-kernel; FP32 also accepted).
 All unpacking runs in 8-bit vector lanes (bitwise ops only; Mosaic has no i8 arithmetic), the MXU consumes
 int8 directly, and per-group partial sums stay exact integers until the single float scale multiply.
 """
@@ -15,6 +15,19 @@ from jax.experimental.pallas import tpu as pltpu
 BK = 1024          # inputs per K tile
 NG = BK // 128     # scale groups per K tile
 XMAX = 32639.0     # largest |q| such that the rounded high byte stays within int8
+
+
+def _scales_f32(sv):
+    """Group scales as FP32 inside a kernel.  Scales may be stored as raw IEEE half bit patterns (int16):
+    Mosaic cannot load f16, so the half (in [0, 128), checked at load) is decoded with integer ops; every half is
+    an integer multiple of 2^-24, which FP32 represents exactly."""
+    if sv.dtype != jnp.int16:
+        return sv
+    u = sv.astype(jnp.int32) & 0x7FFF
+    e = u >> 10
+    m = u & 1023
+    i = jnp.where(e == 0, m, (m | 1024) << jnp.maximum(e - 1, 0))
+    return i.astype(jnp.float32) * (2.0 ** -24)
 
 
 def quantize16(x):
@@ -59,7 +72,7 @@ def _gemv_kernel(xb, xsum, w, s, bn):
         t = jnp.concatenate([wv & 3, (wv >> 2) & 3, (wv >> 4) & 3, wv >> 6], axis=0).astype(jnp.int8)
         p = jax.lax.dot_general(xr[...], t, (((1,), (0,)), ((), ())), preferred_element_type=jnp.int32)
         exact = (p[:NG] << 8) + p[NG:] - or_[...][:, :1]
-        acc[...] += jnp.sum(exact.astype(jnp.float32) * sr[...], axis=0, keepdims=True)
+        acc[...] += jnp.sum(exact.astype(jnp.float32) * _scales_f32(sr[...]), axis=0, keepdims=True)
 
         @pl.when(pl.program_id(1) == nt - 1)
         def _():
@@ -108,7 +121,7 @@ def _gemm_kernel(x, w, s, bm, bn):
         @pl.when(pl.program_id(2) == 0)
         def _():
             acc[...] = jnp.zeros((bm, bn), jnp.float32)
-        wv, sv, xv = wr[...], sr[...], xr[...]
+        wv, sv, xv = wr[...], _scales_f32(sr[...]), xr[...]
         srep = jnp.concatenate([jnp.broadcast_to(sv[g:g + 1], (32, bn)) for g in range(NG)], axis=0)
         tot = acc[...]
         for j, plane in enumerate((wv & 3, (wv >> 2) & 3, (wv >> 4) & 3, wv >> 6)):

@@ -3,7 +3,8 @@ from bonsai_tpu.engine import Engine
 import os
 NCTX=int(os.environ.get('BONSAI_NCTX','8192'));KV=os.environ.get('BONSAI_KV','bfloat16')
 LENS=[int(x) for x in os.environ.get('BONSAI_LENS','512,2048,8192').split(',')]
-E=Engine(None,n_ctx=NCTX,kv_dtype=KV,preloaded=(G,CFG,PARAMS),block=16)
+E=Engine(None,n_ctx=NCTX,kv_dtype=KV,preloaded=(G,CFG,PARAMS),block=16,max_snapshots=int(os.environ.get('BONSAI_SNAPS','6')),speculate=False,park_bytes=0)
+print('warmup',round(E.warmup(),1),E.memory(),flush=True)
 rng=np.random.default_rng(0)
 text_ids=E.tokenizer.encode(open('/content/tests/data/long_text.txt').read())
 print('corpus tokens',len(text_ids),flush=True)
@@ -11,7 +12,7 @@ res=dict(n_ctx=NCTX,kv=KV,rows=[])
 for Lp in LENS:
     ids=(text_ids*(Lp//len(text_ids)+1))[:Lp-80]
     row=dict(prompt_tokens=len(ids),prefill_s=[],decode_tok_s=[])
-    for trial in range(3):
+    for trial in range(int(os.environ.get('BONSAI_TRIALS','3'))):
         E.reset();jax.block_until_ready(E.state)
         t=time.perf_counter();lg=E.feed(ids);lg.block_until_ready();dt=time.perf_counter()-t
         row['prefill_s'].append(dt)
@@ -20,8 +21,8 @@ for Lp in LENS:
             n+=1
             if n==1:t=time.perf_counter()   # first yield follows a 1-token feed; time the block loop only
         row['decode_tok_s'].append((n-1)/(time.perf_counter()-t))
-    row['prefill_tok_s_warm']=len(ids)/min(row['prefill_s'][1:]);row['first_prefill_s_incl_compile']=row['prefill_s'][0]
-    row['hbm_in_use_gib']=E.memory()['bytes_in_use']/2**30
+    row['prefill_tok_s_warm']=len(ids)/min(row['prefill_s'][-1:]);row['first_prefill_s_incl_compile']=row['prefill_s'][0]
+    row['hbm_in_use_gib']=E.memory()['bytes_in_use']/2**30;row['hbm_peak_gib']=E.memory()['peak_bytes_in_use']/2**30
     res['rows'].append(row);print(json.dumps({k:(round(v,3) if isinstance(v,float) else [round(x,3) for x in v] if isinstance(v,list) else v) for k,v in row.items()}),flush=True)
 res['hbm']=E.memory()
 json.dump(res,open('/content/bonsai-results/bench-context-%s-%d.json'%(KV,NCTX),'w'),indent=1)

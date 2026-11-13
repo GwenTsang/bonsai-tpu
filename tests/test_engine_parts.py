@@ -38,7 +38,7 @@ def test_block_diagonal_gemv_algebra():
     mat = b4_from_ptq1(payload, scales)
     x = rng.standard_normal(k).astype(np.float32)
     xb, xsum, alpha = (np.asarray(v) for v in kernels.prep_gemv(jnp.asarray(x)))
-    w, s = np.asarray(mat['w']), np.asarray(mat['s'])
+    w, s = np.asarray(mat['w']), np.asarray(mat['s']).view(np.float16).astype(np.float32)
     ng, bk = kernels.NG, kernels.BK
     y = np.zeros(n, np.float64)
     for t in range(k // bk):
@@ -51,6 +51,13 @@ def test_block_diagonal_gemv_algebra():
     assert np.linalg.norm(y / alpha - ref) / np.linalg.norm(ref) < 1e-4       # 16-bit activations
     q = np.round(x * alpha)
     np.testing.assert_allclose(y, dense.astype(np.float64) @ q, rtol=1e-9, atol=1e-6)   # integer-exact part
+
+
+def test_half_scale_decode_matches_ieee():
+    """Integer decode of raw half bits used inside the kernels, over every half in [0, 128)."""
+    bits = np.arange(0, np.float16(128).view(np.int16), dtype=np.int16)
+    got = np.asarray(kernels._scales_f32(jnp.asarray(bits)))
+    np.testing.assert_array_equal(got, bits.view(np.float16).astype(np.float32))
 
 
 def test_gemm_column_order_matches_planes():
