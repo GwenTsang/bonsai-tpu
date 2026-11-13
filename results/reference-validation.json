@@ -1,0 +1,9 @@
+{
+  "capture_preserves_logits_exactly": true,
+  "captured_tensors": 117,
+  "shape": [
+    8,
+    248320
+  ],
+  "all_logits_finite": true
+}

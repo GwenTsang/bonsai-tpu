@@ -1,0 +1,9 @@
+[project]
+name = "bonsai-tpu"
+version = "0.0.1"
+description = "Experimental packed ternary kernels for single-chip TPU inference"
+requires-python = ">=3.12"
+dependencies = ["numpy>=2.2"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

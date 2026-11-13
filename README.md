@@ -21,3 +21,21 @@ python3 scripts/inspect_gguf.py
 ```
 
 The reader consumes HF_TOKEN from the environment when present. Never commit credentials.
+
+Validated building blocks now include exact NumPy/JAX PTQ1_0 and PQ2_0 decoding,
+Hadamard activation transforms, a CPU reference logit/tensor dumper, and an
+experimental Pallas matmul with local weight reconstruction. Full-model TPU
+execution is still under development. BF16/INT8 numerical changes have not
+passed end-to-end quality validation.
+
+Local correctness tests (requires the pinned reference build):
+
+```sh
+.venv/bin/python -m pytest -q
+PYTHONPATH=. .venv/bin/python scripts/real_weight_vectors.py
+```
+
+Remote experiment scripts require uploading the package tarball and vectors as
+described in the research log and script paths. The Colab kernel retains imported
+modules; reload changed modules or use an isolated namespace, without restarting
+the TPU runtime unnecessarily.

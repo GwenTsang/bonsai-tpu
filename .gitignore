@@ -3,3 +3,10 @@ __pycache__/
 .venv/
 *.gguf
 *.npy
+
+weights/
+*.npz
+
+reference/dump_logits
+
+results/reference-tensors/*.bin

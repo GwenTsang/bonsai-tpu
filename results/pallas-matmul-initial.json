@@ -1,0 +1,173 @@
+[
+  {
+    "m": 1,
+    "k": 5120,
+    "n": 17408,
+    "bm": 32,
+    "bk": 512,
+    "bn": 256,
+    "error": "The Pallas TPU lowering currently requires that the last two dimensions of your block shape are divisible by 8 and 128 respectively, or be equal to the respective dimensions of the overall array. Block spec for args[2] in pallas_call body at /content/bonsai_tpu/pallas_matmul.py:27 has block shape (Blocked(block_size=4), Blocked(block_size=256)), array shape (40, 17408), and index_map { \u001b[34;1mlambda \u001b[39;22m; a\u001b[35m:i32[]\u001b[39m b\u001b[35m:i32[]\u001b[39m c\u001b[35m:i32[]\u001b[39m. \u001b[34;1mlet\u001b[39;22m  \u001b[34;1min \u001b[39;22m(c, b) }, in memory space <MemorySpace.DEFAULT: 'default'>.\nSee details at https://docs.jax.dev/en/latest/pallas/grid_blockspec.html#pallas-blockspec"
+  },
+  {
+    "m": 1,
+    "k": 5120,
+    "n": 17408,
+    "bm": 32,
+    "bk": 1024,
+    "bn": 512,
+    "compile_seconds": 0.5539340240000001,
+    "seconds": [
+      0.0004716290000033041,
+      0.0003941600000416656,
+      0.0003733799999281473,
+      0.00037971999995534134,
+      0.0004539700000805169,
+      0.0004054599999108177,
+      0.00038672999994560087,
+      0.0003852099998766789,
+      0.0003752000000076805
+    ],
+    "median_seconds": 0.00038672999994560087,
+    "max_abs_error": 0.009667575359344482,
+    "relative_l2": 0.0022979737259447575,
+    "memory_analysis": "CompiledMemoryStats(generated_code_size_in_bytes=1472512, argument_size_in_bytes=25108480, output_size_in_bytes=69632, alias_size_in_bytes=0, temp_size_in_bytes=0, host_generated_code_size_in_bytes=0, host_argument_size_in_bytes=0, host_output_size_in_bytes=0, host_alias_size_in_bytes=0, host_temp_size_in_bytes=0)"
+  },
+  {
+    "m": 1,
+    "k": 5120,
+    "n": 17408,
+    "bm": 128,
+    "bk": 1024,
+    "bn": 512,
+    "compile_seconds": 0.5893018880001364,
+    "seconds": [
+      0.000522119999914139,
+      0.0004928889998154773,
+      0.00048565100019004603,
+      0.0004700800000136951,
+      0.0005411300001014752,
+      0.0004648700000871031,
+      0.0004825799999252922,
+      0.0004525900001226546,
+      0.0004668899998705456
+    ],
+    "median_seconds": 0.0004825799999252922,
+    "max_abs_error": 0.009667575359344482,
+    "relative_l2": 0.0022979737259447575,
+    "memory_analysis": "CompiledMemoryStats(generated_code_size_in_bytes=1526784, argument_size_in_bytes=25108480, output_size_in_bytes=69632, alias_size_in_bytes=0, temp_size_in_bytes=0, host_generated_code_size_in_bytes=0, host_argument_size_in_bytes=0, host_output_size_in_bytes=0, host_alias_size_in_bytes=0, host_temp_size_in_bytes=0)"
+  },
+  {
+    "m": 32,
+    "k": 5120,
+    "n": 17408,
+    "bm": 32,
+    "bk": 512,
+    "bn": 256,
+    "error": "The Pallas TPU lowering currently requires that the last two dimensions of your block shape are divisible by 8 and 128 respectively, or be equal to the respective dimensions of the overall array. Block spec for args[2] in pallas_call body at /content/bonsai_tpu/pallas_matmul.py:27 has block shape (Blocked(block_size=4), Blocked(block_size=256)), array shape (40, 17408), and index_map { \u001b[34;1mlambda \u001b[39;22m; a\u001b[35m:i32[]\u001b[39m b\u001b[35m:i32[]\u001b[39m c\u001b[35m:i32[]\u001b[39m. \u001b[34;1mlet\u001b[39;22m  \u001b[34;1min \u001b[39;22m(c, b) }, in memory space <MemorySpace.DEFAULT: 'default'>.\nSee details at https://docs.jax.dev/en/latest/pallas/grid_blockspec.html#pallas-blockspec"
+  },
+  {
+    "m": 32,
+    "k": 5120,
+    "n": 17408,
+    "bm": 32,
+    "bk": 1024,
+    "bn": 512,
+    "compile_seconds": 0.8077718380000078,
+    "seconds": [
+      0.0004295310000088648,
+      0.0004140399998959765,
+      0.0004110900001705886,
+      0.0004163199998856726,
+      0.00043264000009912706,
+      0.00041151999994326616,
+      0.0004046700000799319,
+      0.00041003000001182954,
+      0.0004162500001712033
+    ],
+    "median_seconds": 0.0004140399998959765,
+    "max_abs_error": 9.5367431640625e-07,
+    "relative_l2": 1.2902926016522542e-07,
+    "memory_analysis": "CompiledMemoryStats(generated_code_size_in_bytes=1680384, argument_size_in_bytes=25743360, output_size_in_bytes=2228224, alias_size_in_bytes=0, temp_size_in_bytes=0, host_generated_code_size_in_bytes=0, host_argument_size_in_bytes=0, host_output_size_in_bytes=0, host_alias_size_in_bytes=0, host_temp_size_in_bytes=0)"
+  },
+  {
+    "m": 32,
+    "k": 5120,
+    "n": 17408,
+    "bm": 128,
+    "bk": 1024,
+    "bn": 512,
+    "compile_seconds": 0.8636135899998862,
+    "seconds": [
+      0.0004849000001740933,
+      0.00047912900004121184,
+      0.0004758290001518617,
+      0.00047586000005139795,
+      0.0004811999999674299,
+      0.0004911300000003394,
+      0.00045405000014397956,
+      0.00046605000011368247,
+      0.0004692300001352123
+    ],
+    "median_seconds": 0.00047586000005139795,
+    "max_abs_error": 9.5367431640625e-07,
+    "relative_l2": 1.2902926016522542e-07,
+    "memory_analysis": "CompiledMemoryStats(generated_code_size_in_bytes=1775104, argument_size_in_bytes=25743360, output_size_in_bytes=2228224, alias_size_in_bytes=0, temp_size_in_bytes=0, host_generated_code_size_in_bytes=0, host_argument_size_in_bytes=0, host_output_size_in_bytes=0, host_alias_size_in_bytes=0, host_temp_size_in_bytes=0)"
+  },
+  {
+    "m": 128,
+    "k": 5120,
+    "n": 17408,
+    "bm": 32,
+    "bk": 512,
+    "bn": 256,
+    "error": "The Pallas TPU lowering currently requires that the last two dimensions of your block shape are divisible by 8 and 128 respectively, or be equal to the respective dimensions of the overall array. Block spec for args[2] in pallas_call body at /content/bonsai_tpu/pallas_matmul.py:27 has block shape (Blocked(block_size=4), Blocked(block_size=256)), array shape (40, 17408), and index_map { \u001b[34;1mlambda \u001b[39;22m; a\u001b[35m:i32[]\u001b[39m b\u001b[35m:i32[]\u001b[39m c\u001b[35m:i32[]\u001b[39m. \u001b[34;1mlet\u001b[39;22m  \u001b[34;1min \u001b[39;22m(c, b) }, in memory space <MemorySpace.DEFAULT: 'default'>.\nSee details at https://docs.jax.dev/en/latest/pallas/grid_blockspec.html#pallas-blockspec"
+  },
+  {
+    "m": 128,
+    "k": 5120,
+    "n": 17408,
+    "bm": 32,
+    "bk": 1024,
+    "bn": 512,
+    "compile_seconds": 0.8703808489999574,
+    "seconds": [
+      0.0009257299998353119,
+      0.0008840799998779403,
+      0.0009003190000385075,
+      0.000890439999921,
+      0.0008871899999576272,
+      0.0008769399998982408,
+      0.0008848299999044684,
+      0.0008771600000727631,
+      0.0008663599999181315
+    ],
+    "median_seconds": 0.0008848299999044684,
+    "max_abs_error": 9.5367431640625e-07,
+    "relative_l2": 1.297294858204623e-07,
+    "memory_analysis": "CompiledMemoryStats(generated_code_size_in_bytes=1938432, argument_size_in_bytes=27709440, output_size_in_bytes=8912896, alias_size_in_bytes=0, temp_size_in_bytes=0, host_generated_code_size_in_bytes=0, host_argument_size_in_bytes=0, host_output_size_in_bytes=0, host_alias_size_in_bytes=0, host_temp_size_in_bytes=0)"
+  },
+  {
+    "m": 128,
+    "k": 5120,
+    "n": 17408,
+    "bm": 128,
+    "bk": 1024,
+    "bn": 512,
+    "compile_seconds": 0.9166370720001851,
+    "seconds": [
+      0.0005538200000501092,
+      0.0005129099999976461,
+      0.0004983199999060162,
+      0.0004867999998623418,
+      0.0005127399999764748,
+      0.00048808999986249546,
+      0.00047524000001430977,
+      0.00047042999995028367,
+      0.00047586999994564394
+    ],
+    "median_seconds": 0.00048808999986249546,
+    "max_abs_error": 9.5367431640625e-07,
+    "relative_l2": 1.297294858204623e-07,
+    "memory_analysis": "CompiledMemoryStats(generated_code_size_in_bytes=1972736, argument_size_in_bytes=27709440, output_size_in_bytes=8912896, alias_size_in_bytes=0, temp_size_in_bytes=0, host_generated_code_size_in_bytes=0, host_argument_size_in_bytes=0, host_output_size_in_bytes=0, host_alias_size_in_bytes=0, host_temp_size_in_bytes=0)"
+  }
+]

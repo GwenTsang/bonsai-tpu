@@ -1,0 +1,38 @@
+[
+  {
+    "tensor": "token_embd_weight",
+    "decode_max_error": 0.0,
+    "hadamard_max_error": 0.0,
+    "device": "TPU_0(process=0,(0,0,0,0))"
+  },
+  {
+    "tensor": "output_weight",
+    "decode_max_error": 0.0,
+    "hadamard_max_error": 0.0,
+    "device": "TPU_0(process=0,(0,0,0,0))"
+  },
+  {
+    "tensor": "blk_0_attn_qkv_weight",
+    "decode_max_error": 0.0,
+    "hadamard_max_error": 0.0,
+    "device": "TPU_0(process=0,(0,0,0,0))"
+  },
+  {
+    "tensor": "blk_0_ffn_down_weight",
+    "decode_max_error": 0.0,
+    "hadamard_max_error": 0.0,
+    "device": "TPU_0(process=0,(0,0,0,0))"
+  },
+  {
+    "tensor": "blk_0_ssm_out_weight",
+    "decode_max_error": 0.0,
+    "hadamard_max_error": 0.0,
+    "device": "TPU_0(process=0,(0,0,0,0))"
+  },
+  {
+    "tensor": "blk_3_attn_q_weight",
+    "decode_max_error": 0.0,
+    "hadamard_max_error": 0.0,
+    "device": "TPU_0(process=0,(0,0,0,0))"
+  }
+]
