@@ -2,8 +2,8 @@
 
 A standalone JAX/Pallas inference engine for
 [`prism-ml/Ternary-Bonsai-2-27B-gguf`](https://huggingface.co/prism-ml/Ternary-Bonsai-2-27B-gguf) — the ternary
-quantisation of **Qwen 3.8 27B** — on a single Google TPU v5e-1 (16 GB HBM). That repository (PTQ1_0 file,
-pinned revision `839bd57`) is the built-in default: with no `--model` the engine downloads it.
+quantisation of **Qwen 3.8 27B** — on a single Google TPU v5e-1 (16 GB HBM). That repository (PTQ1_0 file)
+is the built-in default: with no `--model` the engine downloads it.
 
 The GGUF labels its graph `general.architecture = qwen35`; that is the llama.cpp architecture name of this
 hybrid Gated-DeltaNet / attention family (26.9 B ternary weights), not a different model.
@@ -107,6 +107,9 @@ Dependencies on the runtime: `jax`/`jaxlib` with TPU support (0.11.2 tested), `n
   end, every 4096 tokens, after the system prompt/tool schemas and at the last message. A request resumes from
   the nearest checkpoint before the first token that differs from the previous request.
 - Per-message tokenization is cached.
+- Prompt suffixes use a measured, context-dependent schedule of 64- and 512-token chunks; a one-token
+  tail reuses the decode program. This reduces padding and time to first token for short updates; see
+  [prefill scheduling measurements](research/PREFILL_SCHEDULING.md).
 - When the last six generated tokens also occur earlier in the context, the continuation found there is
   verified 32 positions at a time.
 - A conversation about to be displaced by a different one is parked in host RAM (KV rows, recurrent state,

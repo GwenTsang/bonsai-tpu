@@ -10,12 +10,56 @@ from .gguf import GGUF
 from .tokenizer import BonsaiTokenizer, StreamDecoder
 
 PREFILL_BUCKETS = (512, 64)      # compiled chunk sizes; any shorter remainder is padded into one
+# Seconds per executable at each starting context, calibrated by runs/prefill_costs.py on v5e-1.
+# The one-token entry reuses the decode block; it does not compile another program.
+PREFILL_COSTS = (
+    (0, {1: 0.021945, 64: 0.047587, 512: 0.238337}),
+    (8192, {1: 0.022728, 64: 0.048837, 512: 0.265873}),
+    (32768, {1: 0.025244, 64: 0.053686, 512: 0.349671}),
+    (61440, {1: 0.028078, 64: 0.058987, 512: 0.447271}),
+)
 TOPK = 64
 MAX_STOP = 8
 SPEC_K = 32          # positions verified per speculative pass (one compiled program)
 SPEC_NGRAM = 6       # context n-gram that must match before a continuation is proposed
 SPEC_MIN_DRAFT = 6   # shortest draft worth a batched pass
 SPEC_BACKOFF = 24    # tokens generated normally after a rejected draft
+
+
+def prefill_plan(n_tokens, position=0, costs=PREFILL_COSTS):
+    """Cheapest sequence of existing prefill buckets, with a decode step for a one-token tail.
+
+    Costs are linearly interpolated by the context at each chunk's start (clamped outside the table).
+    Full chunks advance by multiples of 64; only the final chunk is padded. Dynamic programming over
+    those boundaries avoids a large padded pass when a few small passes cost less. Returns bucket sizes,
+    where 1 denotes the existing decode executable. Host work is O(ceil(n_tokens / 64)).
+    """
+    if n_tokens < 0 or position < 0:
+        raise ValueError('token count and position must be nonnegative')
+    unit = PREFILL_BUCKETS[-1]
+    slots = (n_tokens + unit - 1) // unit
+    best = [0.0] * (slots + 1)
+    choices = [0] * slots
+
+    def cost(at, bucket):
+        for (lo, a), (hi, b) in zip(costs, costs[1:]):
+            if at < hi:
+                fraction = max(0.0, (at - lo) / (hi - lo))
+                return a[bucket] + fraction * (b[bucket] - a[bucket])
+        return costs[-1][1][bucket]
+
+    for i in range(slots - 1, -1, -1):
+        remaining = n_tokens - i * unit
+        buckets = (1,) + PREFILL_BUCKETS if remaining == 1 else PREFILL_BUCKETS
+        candidates = [(cost(position + i * unit, m) + best[min(slots, i + (m + unit - 1) // unit)], m)
+                      for m in buckets]
+        best[i], choices[i] = min(candidates)
+    plan, i = [], 0
+    while i < slots:
+        m = choices[i]
+        plan.append(m)
+        i += (m + unit - 1) // unit
+    return plan
 
 
 def top_candidates(logits, k=TOPK, width=128):
@@ -186,6 +230,15 @@ class Engine:
         return self._program(('prefill', m), lambda: jax.jit(
             functools.partial(M.prefill_chunk, self.cfg), donate_argnums=(1,)))
 
+    def _feed_one(self, token):
+        # Reuse the warmed decode block for a one-token suffix. Its sampled token/key are discarded;
+        # generation starts its own PRNG after feed(), and needs the logits after this input token.
+        _, _, self.state, _, logits = self._block_fn()(
+            self.params, self.state, jnp.int32(token), jax.random.PRNGKey(0), jnp.int32(1),
+            jnp.float32(0), jnp.int32(1), jnp.float32(1), jnp.float32(0),
+            jnp.full((MAX_STOP,), -1, jnp.int32))
+        return logits
+
     def _verify_fn(self):
         cfg = self.cfg
 
@@ -227,13 +280,15 @@ class Engine:
             raise ValueError('context overflow: %d + %d > n_ctx=%d' % (len(self.history), len(tokens), self.n_ctx))
         logits = self.pending_logits
         i = 0
-        while i < len(tokens):
+        for m in prefill_plan(len(tokens), base):
             rest = len(tokens) - i
-            m = PREFILL_BUCKETS[0] if rest > PREFILL_BUCKETS[-1] else PREFILL_BUCKETS[-1]
             n = min(m, rest)
-            chunk = tokens[i:i + n] + [0] * (m - n)
-            logits, self.state = self._prefill_fn(m)(
-                self.params, self.state, jnp.asarray(chunk, jnp.int32), jnp.int32(n))
+            if m == 1:
+                logits = self._feed_one(tokens[i])
+            else:
+                chunk = tokens[i:i + n] + [0] * (m - n)
+                logits, self.state = self._prefill_fn(m)(
+                    self.params, self.state, jnp.asarray(chunk, jnp.int32), jnp.int32(n))
             before = len(self.history)
             self.history.extend(tokens[i:i + n])
             i += n

@@ -265,3 +265,19 @@ follows the used length. Block decode with BF16 KV: 13.1 ms at ~0 context, 13.4 
   twice.
 
 Recovery: `scripts/start_server.sh [n_ctx]` (attach-only; never provisions). See README "Recovery".
+
+## 2026-11-13 — Cost-aware prefill scheduling (proposition 3)
+
+- Calibrated the existing 64/512 prefill programs and one-step decode at 0, 8K, 32K and 60K context.
+  A host dynamic program selects chunk sizes using interpolated costs; one-token tails reuse the warmed
+  decode block without affecting generation's PRNG. No new model executable shape.
+- Paired TPU benchmark: 48 context/suffix combinations, three trials per policy, identical restored prefixes.
+  A 65-token suffix improves from ~238 to ~67 ms at short context and ~447 to ~84 ms at 60K context;
+  a 128-token suffix improves from ~238 to ~94 ms. Full 512-token chunks retain their existing path.
+- CPU: 26 tests pass. TPU: state/KV comparisons, exact checkpoint replay and CPU-reference evaluation
+  (both policies 319/320 top-1, mean KL ~1.3e-5) pass. All 48 immediate next-token argmaxes agree.
+- BF16 chunk boundaries can flip near ties: the 320-token generation example diverges at output index 5,
+  where the old top-two logit gap is 0.00011 and the shared-prefix distribution KL is 5.7e-6. This is
+  documented rather than asserting bit-identical free generation across policies.
+- Reproduction, TTFT, padding-work interpretation and raw data: research/PREFILL_SCHEDULING.md,
+  results/prefill-costs.json, results/prefill-schedule.json. Final TPU run: PREFILL_SCHEDULE_VALIDATED.

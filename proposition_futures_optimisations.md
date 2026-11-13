@@ -43,6 +43,9 @@ In `results/parking.json`, a roughly 19K-token conversation takes approximately 
 
 ## 3. Use cost-aware prefill chunk scheduling
 
+Implementation update: this proposal is now implemented. See [the measurements and validation](research/PREFILL_SCHEDULING.md),
+with raw results in `results/prefill-costs.json` and `results/prefill-schedule.json`. The original proposal follows.
+
 Location: `bonsai_tpu/engine.py`, `feed()` and `PREFILL_BUCKETS`.
 
 Every remainder above 64 tokens currently selects the 512-token executable. A 65-token suffix therefore performs a padded 512-token pass. Message-boundary checkpoints can create many such short segments.
