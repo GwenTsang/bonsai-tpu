@@ -33,7 +33,14 @@ import sys
 sys.stdout.write(open('/content/logs/$name.log').read())
 PY
 : > "$log"
-timeout 120 colab exec -s bonsai-tpu --timeout 60 -f "$t" 2>&1 | grep -E 'STARTED|BUSY|Error' || true
+started=""
+for attempt in 1 2 3; do
+  started=$(timeout 120 colab exec -s bonsai-tpu --timeout 60 -f "$t" 2>&1 | grep -E 'STARTED|BUSY' | head -1 || true)
+  [ -n "$started" ] && break
+  sleep 5
+done
+echo "${started:-START FAILED}"
+[ "$started" = "STARTED" ] || { rm -f "$t" "$p"; exit 1; }
 end=$((SECONDS+${RUN_TIMEOUT:-1800}))
 while [ $SECONDS -lt $end ]; do
   sleep ${RUN_POLL:-6}

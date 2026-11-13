@@ -4,7 +4,7 @@ import threading,os,socketserver
 from bonsai_tpu.engine import Engine
 from bonsai_tpu.server import serve
 NCTX=int(os.environ.get('BONSAI_NCTX','65536'))
-E=Engine(None,n_ctx=NCTX,kv_dtype='bfloat16',preloaded=(G,CFG,PARAMS),block=int(os.environ.get('BONSAI_BLOCK','8')))
+E=Engine(None,n_ctx=NCTX,kv_dtype='bfloat16',preloaded=(G,CFG,PARAMS),block=int(os.environ.get('BONSAI_BLOCK','16')))
 print('warmup s',round(E.warmup(),1),flush=True)
 socketserver.TCPServer.allow_reuse_address=True
 HTTPD=serve(E,'127.0.0.1',int(os.environ.get('BONSAI_PORT','8000')),default_thinking=os.environ.get('BONSAI_THINK','0')=='1')

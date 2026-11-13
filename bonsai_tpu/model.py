@@ -385,11 +385,10 @@ def attention_mixer_many(cfg, L, signs, h, k_cache, v_cache, pos):
     return y, k_cache, v_cache
 
 
-def prefill_chunk(cfg, params, state, tokens, n_valid):
-    """Process the first n_valid of tokens[M] in one batched pass (the rest is padding, so one compiled
-    program serves every length <= M).  Padding never alters recurrent state; its KV rows land beyond the
-    valid range and are overwritten by later tokens (caches carry M rows of slack).
-    Returns logits for the last valid token and the new state."""
+def forward_chunk(cfg, params, state, tokens, n_valid):
+    """Batched pass over tokens[M] (first n_valid real, rest padding).  Returns final hidden rows [M, d] and
+    the new state.  Padding never alters recurrent state; its KV rows land beyond the valid range and are
+    overwritten by later tokens (caches carry M rows of slack)."""
     signs = params['signs']
     x = embed_many(params, tokens)
     pos = state['pos']
@@ -409,5 +408,19 @@ def prefill_chunk(cfg, params, state, tokens, n_valid):
             ia += 1
         x = x + y
         x = x + ffn_many(cfg, L, signs, rms_norm(x, L['post_norm']))
+    return x, new
+
+
+def prefill_chunk(cfg, params, state, tokens, n_valid):
+    """Prompt processing: one compiled program serves every length <= M.  Returns the logits after the
+    last valid token and the new state."""
+    x, new = forward_chunk(cfg, params, state, tokens, n_valid)
     h = rms_norm(x[n_valid - 1], params['out_norm'])
-    return kernels.gemv(rotate(h, signs[cfg.n_embd]), params['head']), new
+    return kernels.gemv(rotate(h, params['signs'][cfg.n_embd]), params['head']), new
+
+
+def verify_chunk(cfg, params, state, tokens, n_valid):
+    """Speculative-decoding verification: logits [M, vocab] after every position, and the new state."""
+    x, new = forward_chunk(cfg, params, state, tokens, n_valid)
+    h = rms_norm(x, params['out_norm'])
+    return kernels.gemm(rotate(h, params['signs'][cfg.n_embd]), params['head']), new

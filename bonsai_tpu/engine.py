@@ -11,6 +11,10 @@ from .tokenizer import BonsaiTokenizer, StreamDecoder
 PREFILL_BUCKETS = (512, 64)      # compiled chunk sizes; any shorter remainder is padded into one
 TOPK = 64
 MAX_STOP = 8
+SPEC_K = 32          # positions verified per speculative pass (one compiled program)
+SPEC_NGRAM = 6       # context n-gram that must match before a continuation is proposed
+SPEC_MIN_DRAFT = 6   # shortest draft worth a batched pass
+SPEC_BACKOFF = 24    # tokens generated normally after a rejected draft
 
 
 def top_candidates(logits, k=TOPK, width=128):
@@ -63,8 +67,11 @@ def decode_block(cfg, n_max, params, state, token, key, n, temperature, top_k, t
 
 
 class Engine:
-    def __init__(self, gguf_path, n_ctx=8192, kv_dtype='bfloat16', log=print, preloaded=None, block=8, max_programs=12,
-                 max_snapshots=6, snapshot_every=4096, compile_cache='~/.cache/bonsai_tpu/xla'):
+    def __init__(self, gguf_path, n_ctx=8192, kv_dtype='bfloat16', log=print, preloaded=None, block=16, max_programs=12,
+                 max_snapshots=6, snapshot_every=4096, compile_cache='~/.cache/bonsai_tpu/xla',
+                 speculate=True):
+        self.speculate = bool(speculate)
+        self.spec_stats = {'rounds': 0, 'drafted': 0, 'accepted': 0, 'misses': 0}
         self.block = int(block)
         self.log = log or (lambda *a, **k: None)
         if compile_cache:
@@ -108,6 +115,7 @@ class Engine:
         self.history = []          # token ids already absorbed into the state
         self.pending_logits = None
         self.snapshots = []        # recurrent-state checkpoints, ascending position
+        self._ngram, self._ngram_upto = {}, 0
 
     # Agent loops resend the whole conversation with small edits (re-rendered tool calls, stripped
     # reasoning).  The KV cache is position-addressed, so rewinding it is free, but the recurrent (GDN and
@@ -140,6 +148,7 @@ class Engine:
                       'k': self.state['k'], 'v': self.state['v']}
         self.history = self.history[:sn['pos']]
         self.pending_logits = None
+        self._ngram, self._ngram_upto = {}, 0
         return sn['pos']
 
     def _program(self, key, build):
@@ -165,6 +174,15 @@ class Engine:
         return self._program(('prefill', m), lambda: jax.jit(
             functools.partial(M.prefill_chunk, self.cfg), donate_argnums=(1,)))
 
+    def _verify_fn(self):
+        cfg = self.cfg
+
+        def fn(params, state, tokens, n_valid, key, temperature, top_k, top_p, min_p):
+            logits, state = M.verify_chunk(cfg, params, state, tokens, n_valid)
+            keys = jax.random.split(key, tokens.shape[0])
+            return jax.vmap(lambda l, k: sample_token(l, k, temperature, top_k, top_p, min_p))(logits, keys), state
+        return self._program('verify', lambda: jax.jit(fn, donate_argnums=(1,)))
+
     def warmup(self):
         """Compile every program the engine uses (decode block and both prefill sizes) before serving."""
         t = time.perf_counter()
@@ -173,6 +191,9 @@ class Engine:
             self.feed([0] * m)
         for _ in self.generate_ids([0, 1], max_new_tokens=self.block + 2, stop_ids=[-1]):
             pass
+        if self.speculate:
+            _, self.state = self._verify_fn()(self.params, self.state, jnp.zeros((SPEC_K,), jnp.int32), jnp.int32(1),
+                              jax.random.PRNGKey(0), jnp.float32(0), jnp.int32(1), jnp.float32(1), jnp.float32(0))
         self.reset()
         return time.perf_counter() - t
 
@@ -209,6 +230,30 @@ class Engine:
         self.pending_logits = logits
         return logits
 
+    # -- prompt-lookup speculation ----------------------------------------------------------------
+    # Agent output copies long spans of its context (file edits, quoted tool output).  When the last
+    # SPEC_NGRAM tokens reoccur earlier in the context, the tokens that followed are proposed as a draft and
+    # checked in ONE batched pass: decode is HBM-bandwidth-bound, so 32 positions cost about as much as two
+    # single steps.  Each position's token is still drawn from the model's own distribution; a draft only
+    # guesses that outcome, so the output distribution is unchanged.
+    def _index_history(self):
+        n = SPEC_NGRAM
+        h = self.history
+        start = max(self._ngram_upto, n)
+        for end in range(start, len(h) + 1):
+            self._ngram[tuple(h[end - n:end])] = end          # latest occurrence wins
+        self._ngram_upto = max(start, len(h) + 1)
+
+    def _draft(self, token, limit):
+        h = self.history
+        if len(h) + 1 < SPEC_NGRAM + 1:
+            return []
+        key = tuple(h[len(h) - SPEC_NGRAM + 1:] + [token])
+        end = self._ngram.get(key)
+        if end is None:
+            return []
+        return h[end:end + min(SPEC_K - 1, limit)]
+
     def generate_ids(self, prompt_ids, max_new_tokens=256, temperature=0.0, top_k=20, top_p=0.95, min_p=0.0,
                      seed=0, stop_ids=None, reuse_prefix=True, snap_at=()):
         """Yield generated token ids.  With reuse_prefix, a prompt extending the absorbed history only
@@ -241,6 +286,7 @@ class Engine:
                       'completion_tokens': 0, 'decode_s': 0.0}
         produced = 0
         blocks_done = 0
+        cooldown = 0
         if len(stop) > MAX_STOP:
             raise ValueError('at most %d stop ids' % MAX_STOP)
         stop_arr = jnp.asarray((sorted(stop) + [-1] * MAX_STOP)[:MAX_STOP], jnp.int32)   # fixed shape: one program
@@ -248,6 +294,45 @@ class Engine:
             yield token
             produced += 1
             # run up to `block` steps on device: feeds `token`, returns the tokens sampled after it
+            if self.speculate and cooldown <= 0:
+                self._index_history()
+                room = min(max_new_tokens - produced, self.n_ctx - len(self.history) - 1)
+                draft = self._draft(token, room)
+                if len(draft) >= SPEC_MIN_DRAFT:
+                    n_in = 1 + len(draft)
+                    old_pos = len(self.history)
+                    saved = _copy_tree((self.state['conv'], self.state['gdn']))
+                    chunk = jnp.asarray([token] + draft + [0] * (SPEC_K - n_in), jnp.int32)
+                    key, sub = jax.random.split(key)
+                    preds, self.state = self._verify_fn()(self.params, self.state, chunk, jnp.int32(n_in), sub, *args)
+                    preds = np.asarray(preds)[:n_in].tolist()
+                    acc = 0
+                    while acc < len(draft) and preds[acc] == draft[acc] and preds[acc] not in stop:
+                        acc += 1
+                    self.spec_stats['rounds'] += 1
+                    self.spec_stats['drafted'] += len(draft)
+                    self.spec_stats['accepted'] += acc
+                    if acc + 1 < n_in:
+                        # the state absorbed rejected draft tokens: restore and (if anything was accepted)
+                        # re-absorb exactly token + accepted drafts
+                        self.state = {'pos': jnp.int32(old_pos), 'conv': saved[0], 'gdn': saved[1],
+                                      'k': self.state['k'], 'v': self.state['v']}
+                        if acc == 0:
+                            self.spec_stats['misses'] += 1
+                            cooldown = SPEC_BACKOFF
+                        else:
+                            _, self.state = self._verify_fn()(self.params, self.state, chunk, jnp.int32(acc + 1),
+                                                              sub, *args)
+                    if acc > 0:
+                        self.history.extend([token] + draft[:acc])
+                        for t in draft[:acc]:
+                            yield t
+                            produced += 1
+                        token = preds[acc]
+                        self.pending_logits = None
+                        self.stats['completion_tokens'] = produced
+                        self.stats['decode_s'] = time.perf_counter() - t1
+                        continue
             # ramp 1, 2, 4, ... so the first tokens stream immediately, then amortise dispatch
             budget = min(self.block, 1 << min(blocks_done, 10), max_new_tokens - produced + 1,
                          self.n_ctx - len(self.history))
@@ -255,6 +340,7 @@ class Engine:
             out, cnt, self.state, key, logits = self._block_fn()(
                 self.params, self.state, jnp.int32(token), key, jnp.int32(budget), *args, stop_arr)
             out = np.asarray(out)[:int(cnt)].tolist()
+            cooldown -= len(out)
             self.history.extend([token] + out[:-1])
             self.pending_logits = None            # logits belong to out[-1]'s predecessor; see below
             for t in out[:-1]:

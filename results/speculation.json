@@ -1,0 +1,77 @@
+{
+ "copy_edit_base": {
+  "task": "copy_edit",
+  "spec": false,
+  "prompt": 1632,
+  "gen": 1500,
+  "decode_s": 21.31,
+  "tok_s": 70.4,
+  "rounds": 0,
+  "drafted": 0,
+  "accepted": 0,
+  "misses": 0
+ },
+ "copy_edit_spec": {
+  "task": "copy_edit",
+  "spec": true,
+  "prompt": 1632,
+  "gen": 1500,
+  "decode_s": 2.63,
+  "tok_s": 571.0,
+  "rounds": 49,
+  "drafted": 1519,
+  "accepted": 1434,
+  "misses": 0
+ },
+ "copy_edit_identical_prefix": 1500,
+ "essay_base": {
+  "task": "essay",
+  "spec": false,
+  "prompt": 24,
+  "gen": 428,
+  "decode_s": 6.07,
+  "tok_s": 70.5,
+  "rounds": 0,
+  "drafted": 0,
+  "accepted": 0,
+  "misses": 0
+ },
+ "essay_spec": {
+  "task": "essay",
+  "spec": true,
+  "prompt": 24,
+  "gen": 428,
+  "decode_s": 6.09,
+  "tok_s": 70.3,
+  "rounds": 0,
+  "drafted": 0,
+  "accepted": 0,
+  "misses": 0
+ },
+ "essay_identical_prefix": 428,
+ "summarize_base": {
+  "task": "summarize",
+  "spec": false,
+  "prompt": 1616,
+  "gen": 1500,
+  "decode_s": 21.31,
+  "tok_s": 70.4,
+  "rounds": 0,
+  "drafted": 0,
+  "accepted": 0,
+  "misses": 0
+ },
+ "summarize_spec": {
+  "task": "summarize",
+  "spec": true,
+  "prompt": 1616,
+  "gen": 1500,
+  "decode_s": 12.58,
+  "tok_s": 119.2,
+  "rounds": 32,
+  "drafted": 992,
+  "accepted": 717,
+  "misses": 1
+ },
+ "summarize_identical_prefix": 1500
+}
