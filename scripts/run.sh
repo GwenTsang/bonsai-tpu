@@ -14,6 +14,7 @@ with tarfile.open('/content/bonsai-pkg.tar.gz') as f:f.extractall('/content',fil
 if '/content' not in sys.path:sys.path.insert(0,'/content')
 for _m in [m for m in sys.modules if m.split('.')[0] in ('bonsai_tpu','bench')]:del sys.modules[_m]
 os.makedirs('/content/bonsai-results',exist_ok=True);os.makedirs('/content/logs',exist_ok=True)
+for _kv in '''${RUN_ENV:-}'''.split():os.environ[_kv.split('=',1)[0]]=_kv.split('=',1)[1]
 _LOG=open('/content/logs/$name.log','w')
 def print(*a,**k):
     k.pop('file',None);k.pop('flush',None);builtins.print(*a,file=_LOG,flush=True,**k)

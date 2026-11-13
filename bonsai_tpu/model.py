@@ -7,7 +7,7 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 from . import kernels
-from .hadamard import fwht_mxu, grouped_gdn, sign_table
+from .hadamard import fwht_batched, fwht_mxu, grouped_gdn, sign_table
 from .pack import b4_from_ptq1, concat_outputs
 from .quantization import decode_codes
 
@@ -95,7 +95,9 @@ def load_params(gguf, log=print):
     return cfg, params
 
 
-def init_state(cfg, n_ctx, kv_dtype=jnp.float32):
+def init_state(cfg, n_ctx, kv_dtype=jnp.float32, slack=0):
+    """slack: extra KV rows so a padded prefill chunk may write past the last valid position."""
+    n_ctx = n_ctx + slack
     n_rec = sum(cfg.is_recurrent(i) for i in range(cfg.n_layer))
     n_full = cfg.n_layer - n_rec
     c = cfg.gdn_inner + 2 * cfg.gdn_k_heads * cfg.gdn_dk
@@ -120,6 +122,8 @@ def rotate(x, signs, gdn=False):
     """Prism activation transform preceding every folded ternary matrix."""
     if gdn:
         x = grouped_gdn(x, xp=jnp)
+    if x.ndim == 2:
+        return fwht_batched(x * signs, jnp, jax.lax)
     return fwht_mxu(x * signs, jnp, HI)
 
 
@@ -155,8 +159,8 @@ def recurrent_mixer(cfg, L, signs, h, conv_state, gdn_state):
     window = jnp.concatenate((conv_state, qkv[None, :]), axis=0)                  # [4, C] oldest first
     conv = jax.nn.silu(jnp.sum(window * L['conv'].T, axis=0))
     qk = l2_norm(conv[:2 * hk * dk].reshape(2 * hk, dk))
-    heads = jnp.arange(hv) % hk
-    q, k = qk[:hk][heads], qk[hk:][heads]                                         # [hv, dk]
+    rep = hv // hk                                                                # value head h uses key head h % hk
+    q, k = jnp.tile(qk[:hk], (rep, 1)), jnp.tile(qk[hk:], (rep, 1))               # [hv, dk]
     v = conv[2 * hk * dk:].reshape(hv, dk)
     gate = L['a'] * jax.nn.softplus(alpha + L['dt'])
     # Gated delta rule with two reads of the old state and one write:
@@ -235,7 +239,7 @@ def embed_many(params, tokens):
     e = params['embed']
     codes = decode_codes(e['payload'][tokens], 143, jnp).astype(jnp.float32)      # [M, G, 128]
     x = (codes * e['scales'][tokens][:, :, None]).reshape(tokens.shape[0], -1)
-    return fwht_mxu(x, jnp, HI) * params['signs'][x.shape[-1]]
+    return fwht_batched(x, jnp, jax.lax) * params['signs'][x.shape[-1]]
 
 
 def ffn_many(cfg, L, signs, x):
@@ -258,8 +262,56 @@ def gdn_scan(q, k, v, gate, beta, state):
     return out, state
 
 
-def recurrent_mixer_many(cfg, L, signs, h, conv_state, gdn_state):
+def gdn_chunked(q, k, v, gate, beta, state, chunk=64):
+    """Chunk-parallel gated delta rule, algebraically identical to gdn_scan.
+
+    Within a chunk (decay a_t = e^{g_t}, G = cumsum g):
+        delta_i = beta_i (v_i - e^{G_i} S0 k_i - sum_{j<i} e^{G_i-G_j} (k_j.k_i) delta_j)
+    i.e. (I + diag(beta) A) Delta = diag(beta) (V - Gamma K S0^T) with A strictly lower triangular and
+    independent of S0, so every chunk's unit-triangular inverse is computed at once and only T/chunk
+    sequential steps (each a few small matmuls) remain.
+        out_t = e^{G_t} S0 q_t + sum_{i<=t} e^{G_t-G_i} (k_i.q_t) delta_i
+        S_end = e^{G_C} S0 + sum_i e^{G_C-G_i} delta_i k_i^T
+    """
+    t, hv, d = q.shape
+    n = -(-t // chunk)
+    pad = n * chunk - t
+
+    def prep(x):                      # [T, hv, ...] -> [n, hv, C, ...]; padding is a no-op token
+        if pad:
+            x = jnp.pad(x, ((0, pad),) + ((0, 0),) * (x.ndim - 1))
+        x = x.reshape((n, chunk) + x.shape[1:])
+        return jnp.swapaxes(x, 1, 2)
+    q, k, v, gate, beta = prep(q), prep(k), prep(v), prep(gate), prep(beta)
+    g = jnp.cumsum(gate, axis=-1)                                           # [n, hv, C]
+    idx = jnp.arange(chunk)
+    lower = idx[:, None] >= idx[None, :]
+    ratio = jnp.exp(jnp.where(lower, g[..., :, None] - g[..., None, :], -jnp.inf))   # e^{G_i - G_j}, j <= i
+    kk = jnp.einsum('nhid,nhjd->nhij', k, k, precision=HI)
+    strict = idx[:, None] > idx[None, :]
+    lmat = jnp.eye(chunk, dtype=jnp.float32) + beta[..., :, None] * jnp.where(strict, ratio * kk, 0.0)
+    tinv = jax.scipy.linalg.solve_triangular(lmat, jnp.broadcast_to(jnp.eye(chunk, dtype=jnp.float32), lmat.shape),
+                                             lower=True, unit_diagonal=True)
+    aq = ratio * jnp.einsum('nhtd,nhid->nhti', q, k, precision=HI)          # [t, i], i <= t
+    gam = jnp.exp(g)
+    wend = jnp.exp(g[..., -1:] - g)                                         # e^{G_C - G_i}
+
+    def step(s, c):
+        qc, kc, vc, bc, gc, tc, ac, wc = c
+        ks = jnp.einsum('hcd,hvd->hcv', kc, s, precision=HI)
+        delta = jnp.einsum('hci,hiv->hcv', tc, bc[..., None] * (vc - gc[..., None] * ks), precision=HI)
+        qs = jnp.einsum('hcd,hvd->hcv', qc, s, precision=HI)
+        out = gc[..., None] * qs + jnp.einsum('hti,hiv->htv', ac, delta, precision=HI)
+        s = gc[:, -1, None, None] * s + jnp.einsum('hcv,hcd->hvd', delta * wc[..., None], kc, precision=HI)
+        return s, out
+    state, out = jax.lax.scan(step, state, (q, k, v, beta, gam, tinv, aq, wend))
+    out = jnp.swapaxes(out, 1, 2).reshape(n * chunk, hv, d)[:t]
+    return out * (d ** -0.5), state
+
+
+def recurrent_mixer_many(cfg, L, signs, h, conv_state, gdn_state, n_valid):
     m = h.shape[0]
+    valid = (jnp.arange(m) < n_valid).astype(jnp.float32)
     dk, hk, hv = cfg.gdn_dk, cfg.gdn_k_heads, cfg.gdn_v_heads
     c = cfg.gdn_inner + 2 * hk * dk
     qkvz = kernels.gemm(rotate(h, signs[cfg.n_embd]), L['qkvz'])
@@ -271,14 +323,16 @@ def recurrent_mixer_many(cfg, L, signs, h, conv_state, gdn_state):
     conv = sum(window[i:i + m] * L['conv'][:, i] for i in range(nk))
     conv = jax.nn.silu(conv)
     qk = l2_norm(conv[:, :2 * hk * dk].reshape(m, 2 * hk, dk))
-    heads = jnp.arange(hv) % hk
-    q, k = qk[:, :hk][:, heads], qk[:, hk:][:, heads]
+    rep = hv // hk
+    q, k = jnp.tile(qk[:, :hk], (1, rep, 1)), jnp.tile(qk[:, hk:], (1, rep, 1))
     v = conv[:, 2 * hk * dk:].reshape(m, hv, dk)
-    gate = L['a'] * jax.nn.softplus(alpha + L['dt'])
-    out, gdn_state = gdn_scan(q, k, v, gate, beta, gdn_state)
+    gate = L['a'] * jax.nn.softplus(alpha + L['dt']) * valid[:, None]
+    # padded rows are exact no-ops for the recurrence: no decay, no write
+    out, gdn_state = gdn_chunked(q, k * valid[:, None, None], v, gate, beta * valid[:, None], gdn_state, chunk=32)
     out = (rms_norm(out, L['ssm_norm']) * jax.nn.silu(z.reshape(m, hv, dk))).reshape(m, -1)
     y = kernels.gemm(rotate(out, signs[cfg.gdn_inner], gdn=True), L['out'])
-    return y, window[m:], gdn_state
+    new_conv = jax.lax.dynamic_slice(window, (n_valid, 0), (nk - 1, c))            # last 3 valid inputs
+    return y, new_conv, gdn_state
 
 
 def attention_mixer_many(cfg, L, signs, h, k_cache, v_cache, pos, act_len):
@@ -319,18 +373,20 @@ def attention_mixer_many(cfg, L, signs, h, k_cache, v_cache, pos, act_len):
     return y, k_cache, v_cache
 
 
-def prefill_chunk(cfg, params, state, tokens, act_len, want_logits=True):
-    """Process tokens[M] in one batched pass.  Returns logits for the last token (or None) and new state."""
+def prefill_chunk(cfg, params, state, tokens, n_valid, act_len, want_logits=True):
+    """Process the first n_valid of tokens[M] in one batched pass (the rest is padding, so one compiled
+    program serves every length <= M).  Padding never alters recurrent state; its KV rows land beyond the
+    valid range and are overwritten by later tokens (caches carry M rows of slack).
+    Returns logits for the last valid token (or None) and the new state."""
     signs = params['signs']
     x = embed_many(params, tokens)
-    m = tokens.shape[0]
     pos = state['pos']
-    new = {'pos': pos + m, 'conv': [], 'gdn': [], 'k': [], 'v': []}
+    new = {'pos': pos + n_valid, 'conv': [], 'gdn': [], 'k': [], 'v': []}
     ir = ia = 0
     for i, L in enumerate(params['layers']):
         h = rms_norm(x, L['attn_norm'])
         if cfg.is_recurrent(i):
-            y, cs, gs = recurrent_mixer_many(cfg, L, signs, h, state['conv'][ir], state['gdn'][ir])
+            y, cs, gs = recurrent_mixer_many(cfg, L, signs, h, state['conv'][ir], state['gdn'][ir], n_valid)
             new['conv'].append(cs)
             new['gdn'].append(gs)
             ir += 1
@@ -343,5 +399,5 @@ def prefill_chunk(cfg, params, state, tokens, act_len, want_logits=True):
         x = x + ffn_many(cfg, L, signs, rms_norm(x, L['post_norm']))
     if not want_logits:
         return None, new
-    h = rms_norm(x[-1], params['out_norm'])
+    h = rms_norm(x[n_valid - 1], params['out_norm'])
     return kernels.gemv(rotate(h, signs[cfg.n_embd]), params['head']), new

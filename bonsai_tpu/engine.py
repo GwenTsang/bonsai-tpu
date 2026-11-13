@@ -8,7 +8,7 @@ from . import model as M
 from .gguf import GGUF
 from .tokenizer import BonsaiTokenizer, StreamDecoder
 
-PREFILL_BUCKETS = (512, 128, 32, 8)
+PREFILL_BUCKETS = (512, 64)      # compiled chunk sizes; any shorter remainder is padded into one
 TOPK = 64
 
 
@@ -83,26 +83,17 @@ class Engine:
 
     # -- state ------------------------------------------------------------------------------------
     def reset(self):
-        self.state = M.init_state(self.cfg, self.n_ctx, self.kv_dtype)
+        self.state = M.init_state(self.cfg, self.n_ctx, self.kv_dtype, slack=PREFILL_BUCKETS[0])
         self.history = []          # token ids already absorbed into the state
         self.pending_logits = None
 
-    def _act_len(self, upto):
-        """Static attention bound: smallest power-of-two bucket (>=1024) covering `upto` positions."""
+    def _act_len(self, upto, factor=2):
+        """Static attention bound: smallest bucket 1024*factor^i covering `upto` positions.  Attention work
+        scales with the bucket, not n_ctx; each bucket is a separate compiled program."""
         n = 1024
         while n < upto:
-            n *= 2
-        return min(n, self.n_ctx)
-
-    def _step_fn(self, act_len):
-        if act_len not in self._step:
-            cfg = self.cfg
-
-            def fn(params, state, token, key, temperature, top_k, top_p, min_p):
-                logits, state = M.decode_step(cfg, params, state, token, act_len)
-                return sample_token(logits, key, temperature, top_k, top_p, min_p), logits, state
-            self._step[act_len] = jax.jit(fn, donate_argnums=(1,))
-        return self._step[act_len]
+            n *= factor
+        return min(n, self.n_ctx + PREFILL_BUCKETS[0])
 
     def _block_fn(self, act_len):
         k = ('block', act_len, self.block)
@@ -128,21 +119,15 @@ class Engine:
         i = 0
         while i < len(tokens):
             rest = len(tokens) - i
-            m = next((b for b in PREFILL_BUCKETS if b <= rest), None)
+            m = PREFILL_BUCKETS[0] if rest > PREFILL_BUCKETS[-1] else PREFILL_BUCKETS[-1]
+            n = min(m, rest)
             pos = len(self.history)
-            if m is None:
-                act = self._act_len(pos + 1)
-                _, logits, self.state = self._step_fn(act)(
-                    self.params, self.state, jnp.int32(tokens[i]), jax.random.PRNGKey(0),
-                    jnp.float32(0), jnp.int32(1), jnp.float32(1), jnp.float32(0))
-                m = 1
-            else:
-                act = self._act_len(pos + m)
-                last = (rest == m)
-                logits, self.state = self._prefill_fn(m, act, last)(
-                    self.params, self.state, jnp.asarray(tokens[i:i + m], jnp.int32))
-            self.history.extend(tokens[i:i + m])
-            i += m
+            act = self._act_len(pos + m, 4)
+            chunk = tokens[i:i + n] + [0] * (m - n)
+            logits, self.state = self._prefill_fn(m, act, rest == n)(
+                self.params, self.state, jnp.asarray(chunk, jnp.int32), jnp.int32(n))
+            self.history.extend(tokens[i:i + n])
+            i += n
         self.pending_logits = logits
         return logits
 

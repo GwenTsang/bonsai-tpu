@@ -69,3 +69,29 @@ def fwht_mxu(x, jnp, precision):
     y = jnp.einsum('ab,nbc->nac', h, y, precision=precision)
     y = jnp.einsum('nac,cd->nad', y, h, precision=precision)
     return (y * (1024 ** -0.5)).reshape(shape)
+
+
+_H1024 = _sylvester(1024)
+
+
+def split_bf16(x, jnp, lax):
+    """x (f32) = a + b + O(2^-16 |x|) with a, b exactly representable in BF16 (mantissa truncation by bit
+    masking; a plain f32->bf16->f32 round trip is algebraically folded away by XLA)."""
+    def trunc(v):
+        bits = lax.bitcast_convert_type(v, jnp.uint32) & jnp.uint32(0xFFFF0000)
+        return lax.bitcast_convert_type(bits, jnp.float32)
+    a = trunc(x)
+    b = trunc(x - a)
+    return a.astype(jnp.bfloat16), b.astype(jnp.bfloat16)
+
+
+def fwht_batched(x, jnp, lax):
+    """Normalized 1024-block Walsh-Hadamard for [M, K] activations: two single-pass BF16 MXU products with
+    exact operands (+-1 matrix, split activations), FP32 accumulation -> ~16-bit accurate."""
+    shape = x.shape
+    a, b = split_bf16(x.reshape(-1, 1024), jnp, lax)
+    h = jnp.asarray(_H1024, dtype=jnp.bfloat16)
+    y = lax.dot_general(jnp.concatenate([a, b], axis=0), h, (((1,), (0,)), ((), ())),
+                        preferred_element_type=jnp.float32)
+    r = a.shape[0]
+    return ((y[:r] + y[r:]) * (1024 ** -0.5)).reshape(shape)

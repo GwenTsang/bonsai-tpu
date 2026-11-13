@@ -1,0 +1,15 @@
+{
+ "embed_many": 1.293,
+ "rms_norm": 0.283,
+ "rotate_5120": 0.453,
+ "rotate_17408": 1.408,
+ "gemm_qkvz": 0.793,
+ "gemm_ffn_gu": 1.256,
+ "gemm_ffn_down": 0.87,
+ "ffn_many": 3.057,
+ "recurrent_mixer_many": 4.754,
+ "gdn_scan": 4.099,
+ "attention_mixer_many": 2.088,
+ "alpha_beta": 0.338,
+ "dispatch_noop": 0.191
+}
